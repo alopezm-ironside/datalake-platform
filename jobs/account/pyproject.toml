@@ -1,0 +1,21 @@
+[project]
+name = "etl-account"
+version = "0.1.0"
+description = "Odoo account.move -> BigQuery incremental ETL (Cloud Run Job)"
+requires-python = ">=3.11"
+dependencies = [
+    "etl-common",
+]
+
+[project.scripts]
+account-job = "account.__main__:main"
+
+[tool.uv.sources]
+etl-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/account"]
