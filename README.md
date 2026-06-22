@@ -32,6 +32,7 @@ modular-etl-engine/
 
 ```bash
 uv sync --all-packages          # instala todo el workspace + grupo dev
+uv run lefthook install         # activa los git hooks (una vez por clon)
 uv run ruff check .             # lint
 uv run mypy                     # type check
 uv run pytest                   # tests

@@ -6,13 +6,17 @@ dev = [
     "ruff>=0.14.13",
     "pytest>=8.3.0",
     "mypy>=1.13.0",
+    "lefthook>=2.1.9",
+    "commitizen>=4.16.4",
 ]
 
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+# Strict ruleset: pycodestyle (E/W), pyflakes (F), isort (I), pep8-naming (N),
+# pyupgrade (UP), bugbear (B), comprehensions (C4), simplify (SIM), Ruff (RUF).
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "jobs"]
@@ -20,6 +24,15 @@ python_files = ["test_*.py"]
 
 [tool.mypy]
 python_version = "3.11"
+strict = true
 explicit_package_bases = true
 ignore_missing_imports = true
 mypy_path = "packages/common/src:jobs/account/src"
+files = ["packages/common/src", "jobs/account/src"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.0"
+version_scheme = "pep440"
+tag_format = "v$version"
+update_changelog_on_bump = true
