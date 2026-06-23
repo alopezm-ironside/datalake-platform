@@ -67,81 +67,66 @@ class SyncPipeline(Generic[T]):
         """Execute the full sync run for the module.
 
         Raises:
-            Exception: Re-raised after calling finish(status="failed").
+            Exception: re-raised after recording the run as failed.
         """
-        # 1. Watermark — last successfully processed id (0 if first run)
         watermark = self._sync_state.get_watermark(self._module_name)
-
-        # 2. Start — inserts control row, returns sync_batch_id
+        last_processed_id = watermark
         sync_batch_id = self._sync_state.start(self._module_name)
 
-        # Bind run-level context so every log line in this run carries
-        # module and sync_batch_id (operator-filterable in Cloud Logging).
+        # Bind once so every log line in the run carries module + sync_batch_id,
+        # making a whole run filterable in Cloud Logging.
         bind_contextvars(module=self._module_name, sync_batch_id=sync_batch_id)
         _log.info("run_started", watermark=watermark)
 
         try:
-            # 3. Fetch all new IDs since the watermark
             new_ids = self._extractor.fetch_new_ids(watermark)
-
-            # 4. Short-circuit: nothing new to sync
             if not new_ids:
                 self._sync_state.finish(sync_batch_id, "success", watermark)
                 _log.info("run_finished", status="success", total=0)
                 return
 
-            # 5. Batch loop
             total_records = 0
-            last_processed_id = watermark
             num_batches = math.ceil(len(new_ids) / self._batch_size)
 
             for batch_index in range(num_batches):
                 start = batch_index * self._batch_size
-                end = start + self._batch_size
-                batch_ids = new_ids[start:end]
+                batch_ids = new_ids[start : start + self._batch_size]
 
-                # 5a. Extract raw dicts for this batch
                 raw = self._extractor.fetch_batch(batch_ids)
-
-                # 5b. Transform raw dicts → typed domain entities
                 entities: list[T] = self._transformer.transform(raw)
+                saved = self._repository.save_batch(entities)
 
-                # 5c. Save to sink — commits data (repository owns Session)
-                self._repository.save_batch(entities)
-
-                # 5d. Checkpoint — AFTER data commit (effectively-once)
-                last_processed_id = batch_ids[-1]
+                # max(), not batch_ids[-1]: a source that breaks the ascending-id
+                # contract must not let the watermark skip past unprocessed ids.
+                last_processed_id = max(last_processed_id, max(batch_ids))
                 stats = SyncStats(
-                    records_processed=len(entities),
-                    records_inserted=len(entities),
-                    records_failed=0,
+                    records_processed=len(batch_ids),
+                    records_inserted=saved,
+                    records_failed=len(batch_ids) - saved,
                     source_api_calls=1,
                 )
                 self._sync_state.checkpoint(sync_batch_id, last_processed_id, stats)
-                total_records += len(entities)
+                total_records += saved
 
                 _log.info(
                     "batch_processed",
                     batch=batch_index + 1,
                     batch_size=len(batch_ids),
-                    records=len(entities),
+                    records=saved,
                 )
 
-            # 6. Finish — success
             self._sync_state.finish(sync_batch_id, "success", last_processed_id)
             _log.info("run_finished", status="success", total=total_records)
 
         except Exception as exc:
-            # 7. On any exception — mark run failed and re-raise
             _log.error("run_failed", error=str(exc))
             self._sync_state.finish(
                 sync_batch_id,
                 "failed",
-                watermark,
+                last_processed_id,
                 error_message=str(exc),
             )
             raise
         finally:
-            # Always clear run-level context so a re-used process does not
-            # leak prior-run fields into subsequent log lines.
+            # Clear so a re-used process never leaks this run's context.
             clear_contextvars()

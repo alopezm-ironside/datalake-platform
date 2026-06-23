@@ -186,7 +186,9 @@ def test_save_batch_called_before_checkpoint_per_batch() -> None:
     transformer = make_transformer()
 
     repository = make_repository()
-    repository.save_batch.side_effect = lambda entities: call_order.append("save_batch")
+    repository.save_batch.side_effect = lambda entities: (
+        call_order.append("save_batch") or len(entities)
+    )
 
     sync_state = make_sync_state()
     sync_state.checkpoint.side_effect = lambda *a, **kw: call_order.append("checkpoint")
@@ -324,3 +326,93 @@ def test_transformer_output_is_entities_not_dicts() -> None:
     assert all(isinstance(e, FakeEntity) for e in actual_entities), (
         f"Expected list[FakeEntity], got {[type(e) for e in actual_entities]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F1 — watermark is max(id), robust to a source that breaks ascending order
+# ---------------------------------------------------------------------------
+
+
+def test_watermark_is_max_id_even_if_ids_unsorted() -> None:
+    """Watermark must be max(processed ids), not the last in the batch, so an
+    unsorted source cannot make the next run skip ids."""
+    extractor = make_extractor(new_ids=[10, 30, 20])
+    transformer = make_transformer()
+    repository = make_repository()
+    repository.save_batch.return_value = 3
+    sync_state = make_sync_state()
+
+    pipeline: SyncPipeline[FakeEntity] = SyncPipeline(
+        module_name="test_module",
+        extractor=extractor,
+        transformer=transformer,
+        repository=repository,
+        sync_state=sync_state,
+        batch_size=100,
+    )
+    pipeline.run()
+
+    args = sync_state.finish.call_args[0]
+    assert args[1] == "success"
+    assert args[2] == 30, "watermark must be max(ids) (30), not batch_ids[-1] (20)"
+
+
+# ---------------------------------------------------------------------------
+# F2 — failed run records checkpoint progress, not the original watermark
+# ---------------------------------------------------------------------------
+
+
+def test_failed_run_records_progress_not_original_watermark() -> None:
+    """On a mid-run failure, finish records how far the run got, not the
+    starting watermark."""
+    ids = list(range(1, 251))  # batches of 100, 100, 50
+    extractor = make_extractor(new_ids=ids)
+    transformer = make_transformer()
+    repository = make_repository()
+    repository.save_batch.side_effect = [100, 100, RuntimeError("boom")]
+    sync_state = make_sync_state(watermark=0)
+
+    pipeline: SyncPipeline[FakeEntity] = SyncPipeline(
+        module_name="test_module",
+        extractor=extractor,
+        transformer=transformer,
+        repository=repository,
+        sync_state=sync_state,
+        batch_size=100,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        pipeline.run()
+
+    args = sync_state.finish.call_args[0]
+    assert args[1] == "failed"
+    assert args[2] == 200, "failed run must record progress (200), not watermark (0)"
+
+
+# ---------------------------------------------------------------------------
+# F3 — checkpoint stats reflect the count save_batch persisted
+# ---------------------------------------------------------------------------
+
+
+def test_stats_use_save_batch_return_count() -> None:
+    """Stats use save_batch's returned count, not len(entities)."""
+    extractor = make_extractor(new_ids=[1, 2, 3])
+    transformer = make_transformer()
+    repository = make_repository()
+    repository.save_batch.return_value = 2  # one fewer than attempted
+    sync_state = make_sync_state()
+
+    pipeline: SyncPipeline[FakeEntity] = SyncPipeline(
+        module_name="test_module",
+        extractor=extractor,
+        transformer=transformer,
+        repository=repository,
+        sync_state=sync_state,
+        batch_size=100,
+    )
+    pipeline.run()
+
+    stats = sync_state.checkpoint.call_args[0][2]
+    assert stats.records_processed == 3
+    assert stats.records_inserted == 2
+    assert stats.records_failed == 1
