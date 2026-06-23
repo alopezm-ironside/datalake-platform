@@ -1,11 +1,7 @@
 """Transformer port — converts raw source dicts into typed domain entities.
 
-The old dict-tuple API (transform_record / transform_related_records /
-transform_batch) is replaced by a single transform() method that returns
-a typed list of domain entities. Validation logic moves to the concrete
-transformer as a private method.
-
-Concrete implementations are updated in Change 1 → Phase 6 (jobs/account).
+A single transform() method replaces the old dict-tuple API. Validation
+is a private concern of each concrete transformer, not a public interface.
 """
 
 from abc import ABC, abstractmethod
@@ -31,11 +27,3 @@ class TransformerInterface(ABC, Generic[T]):
         Returns:
             List of typed domain entities (not dicts).
         """
-
-
-class ValidationInterface(ABC):
-    """Interface para validación de datos transformados."""
-
-    @abstractmethod
-    def validate(self, data: dict[str, Any]) -> bool:
-        """Valida que un registro cumpla reglas de negocio."""

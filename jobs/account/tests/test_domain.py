@@ -1,7 +1,5 @@
 """Tests for account domain entities (Phase 4 — Change 2)."""
 
-import sys
-
 
 def test_account_move_line_is_dataclass_with_expected_fields():
     from account.domain.account_move_line import AccountMoveLine
@@ -106,17 +104,33 @@ def test_account_move_default_lines_is_empty():
 
 
 def test_domain_package_has_no_third_party_imports():
-    """Verify the domain import graph contains no SQLAlchemy, Pydantic, or BigQuery."""
-    import account.domain.account_move
-    import account.domain.account_move_line  # noqa: F401
+    """Verify the domain source files do not import SQLAlchemy, Pydantic, or BigQuery.
 
-    third_party = {
-        "sqlalchemy",
-        "pydantic",
-        "google.cloud.bigquery",
-        "sqlalchemy_bigquery",
-    }
-    loaded = {name for name in sys.modules if name.split(".")[0] in third_party}
+    Inspects source text rather than sys.modules so the test is independent of
+    execution order (other tests may load third-party libs before this one runs).
+    """
+    import ast
+    import importlib.util
+    import pathlib
 
-    # Only stdlib dataclasses should be needed; no third-party frameworks.
-    assert not loaded, f"Domain imported third-party modules: {loaded}"
+    spec = importlib.util.find_spec("account.domain.account_move")
+    assert spec and spec.origin
+    domain_dir = pathlib.Path(spec.origin).parent
+
+    forbidden = {"sqlalchemy", "pydantic", "google", "sqlalchemy_bigquery"}
+    violations: list[str] = []
+
+    for py_file in domain_dir.glob("*.py"):
+        tree = ast.parse(py_file.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".")[0]
+                    if top in forbidden:
+                        violations.append(f"{py_file.name}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                top = node.module.split(".")[0]
+                if top in forbidden:
+                    violations.append(f"{py_file.name}: from {node.module}")
+
+    assert not violations, f"Domain imports forbidden third-party modules: {violations}"
