@@ -30,9 +30,7 @@ def test_get_watermark_returns_last_processed_id_from_success_run():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         result = state.get_watermark("accounting")
 
     assert result == 500
@@ -55,9 +53,7 @@ def test_get_watermark_returns_zero_when_no_success_run():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         result = state.get_watermark("accounting")
 
     assert result == 0
@@ -77,9 +73,7 @@ def test_start_inserts_running_row_and_returns_sync_batch_id():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         batch_id = state.start("accounting")
 
     assert batch_id
@@ -102,9 +96,7 @@ def test_start_returns_unique_ids():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         id1 = state.start("accounting")
         id2 = state.start("accounting")
 
@@ -126,9 +118,7 @@ def test_checkpoint_updates_run_row_in_place():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         state.checkpoint("batch-001", last_processed_id=500, stats=stats)
 
     mock_session.execute.assert_called_once()
@@ -147,9 +137,7 @@ def test_finish_updates_row_with_success_status():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        state = BigQuerySyncState(
-            connection=_make_connection(), control_dataset="control"
-        )
+        state = BigQuerySyncState(connection=_make_connection())
         state.finish("batch-001", "success", last_processed_id=1000)
 
     mock_session.execute.assert_called_once()

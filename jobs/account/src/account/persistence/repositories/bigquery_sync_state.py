@@ -20,9 +20,8 @@ from sqlalchemy.orm import Session
 class BigQuerySyncState(SyncStateInterface):
     """Control-plane adapter that tracks sync runs in control.sync_metadata."""
 
-    def __init__(self, connection: BigQueryConnection, control_dataset: str) -> None:
+    def __init__(self, connection: BigQueryConnection) -> None:
         self._engine = connection.engine
-        self._control_dataset = control_dataset
 
     def get_watermark(self, module_name: str) -> int:
         """Return last_processed_id from the most recent success run, else 0."""
