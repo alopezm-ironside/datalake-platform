@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 import structlog
 from etl_common.infrastructure.bigquery_connection import BigQueryConnection
 from etl_common.interfaces.repository_interface import RepositoryInterface
+from etl_common.observability import get_logger
 from sqlalchemy.orm import Session
 
 from account.domain.account_move import AccountMove
 from account.persistence.models.account_move import AccountMoveORM
 from account.persistence.models.account_move_line import AccountMoveLineORM
 
-_log = structlog.get_logger(__name__)
+_log = get_logger(__name__)
 
 
 class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):

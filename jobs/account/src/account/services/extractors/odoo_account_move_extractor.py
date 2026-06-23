@@ -2,12 +2,12 @@
 
 from typing import Any, ClassVar
 
-import structlog
 from etl_common.infrastructure.odoo_manager import OdooManager
 from etl_common.interfaces.extractor_interface import ExtractorInterface
 from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
+from etl_common.observability import get_logger
 
-_log = structlog.get_logger(__name__)
+_log = get_logger(__name__)
 
 
 class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
