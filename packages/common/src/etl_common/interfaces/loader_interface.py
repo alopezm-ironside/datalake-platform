@@ -1,16 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 class LoaderInterface(ABC):
     """
     Interface para servicios de carga de datos.
 
-    Cualquier implementación (BigQuery, Postgres, Snowflake, etc.) debe cumplir este contrato.
+    Cualquier implementación (BigQuery, Postgres, Snowflake, …) debe cumplir el
+    contrato de carga.
+
     """
 
     @abstractmethod
-    def load_main_records(self, records: List[Dict[str, Any]]) -> int:
+    def load_main_records(self, records: list[dict[str, Any]]) -> int:
         """
         Carga registros principales (ej: movimientos contables).
 
@@ -23,7 +25,7 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    def load_related_records(self, records: List[Dict[str, Any]]) -> int:
+    def load_related_records(self, records: list[dict[str, Any]]) -> int:
         """
         Carga registros relacionados (ej: líneas de movimientos).
 
@@ -37,10 +39,8 @@ class LoaderInterface(ABC):
 
     @abstractmethod
     def load_batch_transactional(
-        self,
-        main_records: List[Dict[str, Any]],
-        related_records: List[Dict[str, Any]]
-    ) -> Tuple[int, int]:
+        self, main_records: list[dict[str, Any]], related_records: list[dict[str, Any]]
+    ) -> tuple[int, int]:
         """
         Carga registros principales y relacionados en una transacción atómica.
 
