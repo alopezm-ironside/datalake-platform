@@ -1,15 +1,15 @@
-import logging
 import xmlrpc.client
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
 
 from etl_common.core.singleton_meta import SingletonMeta
+from etl_common.observability import get_logger
 from etl_common.utils.network import execute_with_retry
 
 from .custom_https_transport import CustomHTTPSTransport
 
-logger = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 
 class OdooManager(metaclass=SingletonMeta):
@@ -24,7 +24,7 @@ class OdooManager(metaclass=SingletonMeta):
         self._rpc_lock = Lock()
 
     def connect(self) -> int:
-        logger.info("Conectando a Odoo...")
+        _log.info("odoo_connecting")
         transport = CustomHTTPSTransport(verify_ssl=False)
         self.common = xmlrpc.client.ServerProxy(
             f"{self.url}/xmlrpc/2/common", transport=transport
@@ -45,7 +45,7 @@ class OdooManager(metaclass=SingletonMeta):
         if not uid or uid <= 0:
             raise ConnectionError(f"Autenticacion fallida - uid={uid}")
         self.uid = int(uid)
-        logger.info(f"Conectado a Odoo como UID: {self.uid}")
+        _log.info("odoo_connected", uid=self.uid)
         return self.uid
 
     def _execute(
@@ -134,9 +134,7 @@ class OdooManager(metaclass=SingletonMeta):
         writes: list[tuple[int, dict[str, Any]]],
         max_workers: int = 8,
     ) -> tuple[int, int]:
-        """
-        Execute multiple writes in parallel, each thread with its own XML-RPC
-        connection to avoid contention on the shared ServerProxy.
+        """Execute multiple writes in parallel via per-thread XML-RPC connections.
 
         Returns (success_count, failed_count).
         """
@@ -161,7 +159,7 @@ class OdooManager(metaclass=SingletonMeta):
                 )
                 return item_id, True
             except Exception as e:
-                logger.error(f"Error write {model} id={item_id}: {e}")
+                _log.error("write_failed", model=model, item_id=item_id, error=str(e))
                 return item_id, False
 
         success, failed = 0, 0
@@ -179,6 +177,6 @@ class OdooManager(metaclass=SingletonMeta):
                 else:
                     failed += 1
                 if done % 100 == 0:
-                    logger.info(f"  Progreso writes: {done}/{total}...")
+                    _log.info("write_progress", done=done, total=total)
 
         return success, failed

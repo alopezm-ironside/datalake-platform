@@ -1,12 +1,11 @@
-import logging
-
 from sqlalchemy import Connection, create_engine
 from sqlalchemy.engine import Engine
 
 from ..core.base import Base
 from ..core.singleton_meta import SingletonMeta
+from ..observability import get_logger
 
-_logger = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 
 class PostgresDBConnection(metaclass=SingletonMeta):

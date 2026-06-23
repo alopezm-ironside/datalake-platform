@@ -1,11 +1,12 @@
 import http.client
-import logging
 import random
 import time
 from collections.abc import Callable
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from etl_common.observability import get_logger
+
+_log = get_logger(__name__)
 
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 2
@@ -37,26 +38,34 @@ def execute_with_retry(
             retry_count += 1
 
             if retry_count > MAX_RETRIES:
-                logger.error(
-                    f"{operation_name} failed after {MAX_RETRIES} retries: {e}"
+                _log.error(
+                    "operation_exhausted",
+                    operation=operation_name,
+                    retries=MAX_RETRIES,
+                    error=type(e).__name__,
                 )
                 raise
 
             jitter = random.uniform(0, 0.1 * backoff_time)
             wait_time = backoff_time + jitter
 
-            logger.warning(
-                f"{operation_name} failed (attempt {retry_count}/{MAX_RETRIES}): "
-                f"{type(e).__name__}"
+            _log.warning(
+                "operation_retry",
+                operation=operation_name,
+                attempt=retry_count,
+                max_retries=MAX_RETRIES,
+                error=type(e).__name__,
+                wait_seconds=round(wait_time, 2),
             )
-            logger.warning(f"   Retrying in {wait_time:.2f} seconds...")
 
             time.sleep(wait_time)
 
             backoff_time = min(backoff_time * 2, MAX_BACKOFF)
         except Exception as e:
-            logger.error(
-                f"{operation_name} failed with non-retryable error: "
-                f"{type(e).__name__}: {e}"
+            _log.error(
+                "operation_failed",
+                operation=operation_name,
+                error_type=type(e).__name__,
+                error=str(e),
             )
             raise
