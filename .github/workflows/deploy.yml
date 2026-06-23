@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: Job module to deploy
+        default: account
+        required: true
+      target:
+        description: Target environment
+        type: choice
+        options: [dev, staging, prod]
+        required: true
+      image:
+        description: "Source image ref with @sha256 digest (from a Build run)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # GitHub Environment supplies per-env vars and any required-reviewer gate.
+    environment: ${{ inputs.target }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Promote digest to target registry
+        id: promote
+        run: |
+          image="${{ inputs.image }}"
+          digest="${image##*@}"
+          target="${{ vars.AR_REPOSITORY }}/${{ inputs.module }}"
+          if [ "${{ inputs.target }}" = "dev" ]; then
+            # Image already lives in the dev registry; deploy it as-is.
+            echo "ref=${image}" >> "$GITHUB_OUTPUT"
+          else
+            # Copy preserves the digest (no rebuild). Requires the target deploy
+            # SA to have artifactregistry.reader on the source (dev) registry.
+            gcloud artifacts docker images copy "${image}" "${target}:promoted" --quiet
+            echo "ref=${target}@${digest}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Roll out
+        run: |
+          gcloud run jobs update "datalake-${{ inputs.module }}-${{ inputs.target }}" \
+            --image "${{ steps.promote.outputs.ref }}" \
+            --region "${{ vars.REGION }}" \
+            --project "${{ vars.GCP_PROJECT }}"
+
+      - name: Summary
+        run: echo "Deployed \`${{ steps.promote.outputs.ref }}\` to **${{ inputs.target }}**" >> "$GITHUB_STEP_SUMMARY"

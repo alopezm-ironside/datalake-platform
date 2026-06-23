@@ -6,8 +6,8 @@
 | -------- | ------ | ----------- |
 | `ci.yml` — quality gates | Implementado | Lint, formato, tipos, tests, commits en cada push/PR |
 | `release.yml` — versión y changelog | Implementado | `cz bump` + `git push --follow-tags` (manual) |
-| `build.yml` — build de imagen | Pendiente (IaC) | Build → Artifact Registry |
-| `deploy.yml` — deploy a Cloud Run | Pendiente (IaC) | Promote por digest → Cloud Run Job |
+| `build.yml` — build de imagen | Implementado | Build once → push a registry dev → deploy a dev |
+| `deploy.yml` — promote a Cloud Run | Implementado | Promote por digest → Cloud Run Job (gate por entorno) |
 
 ## Estrategia de entrega
 
@@ -47,40 +47,51 @@ Pasos:
 La versión sigue el esquema `pep440`, configurada en `[tool.commitizen]` del
 `pyproject.toml`.
 
-## Build de imagen (pendiente — IaC)
+## Workflow Build (`build.yml`)
 
-El build se ejecuta desde la **raíz del repositorio** (contexto del workspace):
+Se activa en push a `main` (cambios en `jobs/`, `packages/`, `pyproject.toml`,
+`uv.lock`) y por `workflow_dispatch`. Autentica a GCP por Workload Identity
+Federation (sin keys), construye desde la **raíz del repositorio** y deploya a
+`dev`:
 
-```bash
-docker build -f jobs/account/Dockerfile -t <registry>/<project>/account:<sha> .
-```
+1. `google-github-actions/auth` con el provider WIF del entorno `dev`
+2. `docker build -f jobs/<módulo>/Dockerfile -t <registry>/<módulo>:<sha> .`
+3. `docker push` y resolución del **digest** (`gcloud artifacts docker images describe`)
+4. `gcloud run jobs update datalake-<módulo>-dev --image <registry>/<módulo>@<digest>`
 
-La imagen usa un build multi-stage distroless:
-- **Builder**: `python:3.11-slim` + `uv` — instala dependencias y construye el
-  paquete
-- **Runtime**: `gcr.io/distroless/cc-debian12` — sin shell, sin herramientas de
-  desarrollo
+La imagen es multi-stage distroless (builder `python:3.11-slim` + `uv`, runtime
+`gcr.io/distroless/cc-debian12`); el `.dockerignore` excluye tests y artefactos
+de desarrollo. Se construye **una sola vez** y se referencia por **digest
+inmutable** para trazabilidad y rollback determinístico.
 
-El `.dockerignore` excluye tests, archivos de desarrollo y `.venv` del contexto
-de build.
+## Workflow Deploy (`deploy.yml`)
 
-Una vez construida, la imagen se referencia por **digest inmutable**
-(no por tag mutable) para garantizar trazabilidad y rollback determinístico.
+Activación: `workflow_dispatch` con `module`, `target` (`dev`/`staging`/`prod`) e
+`image` (ref con `@sha256:` de una corrida de Build). Corre en el GitHub
+Environment del `target`, que aporta sus variables y el gate de revisores:
 
-## Infraestructura pendiente (repositorio de IaC)
+1. Auth WIF con el deploy SA del entorno target
+2. Promote: `gcloud artifacts docker images copy` del digest al registry target
+   (preserva el digest, sin rebuild); en `dev` la imagen ya está y se omite
+3. `gcloud run jobs update datalake-<módulo>-<target> --image …@<digest>`
 
-Los siguientes recursos se definen en el repositorio de infraestructura separado:
+> El promote cross-project (dev→staging/prod) requiere que el deploy SA del
+> entorno target tenga `artifactregistry.reader` sobre el registry de `dev`.
 
-| Recurso | Estado |
-| ------- | ------ |
-| Artifact Registry repository | Pendiente |
-| Cloud Run Job (por módulo) | Pendiente |
-| Datasets de BigQuery (IaC-owned) | Pendiente |
-| Inyección de `GOOGLE_LOCATION` en Cloud Run env | Pendiente |
+### Configuración requerida (GitHub Environments)
 
-> Los datasets de BigQuery (`BQ_DATASET_RAW`, `BQ_DATASET_CONTROL`) son
-> responsabilidad del IaC, no de la aplicación. La app solo crea tablas
-> (`create_tables()`), nunca datasets.
+Cada entorno (`dev`, `staging`, `prod`) define estas variables (no secrets):
+
+| Variable | Origen |
+| -------- | ------ |
+| `WIF_PROVIDER` | output `wif_provider_name` del módulo IaC |
+| `DEPLOY_SA_EMAIL` | output `deployer_service_account_email` |
+| `AR_REPOSITORY` | output `artifact_registry_repository` |
+| `AR_LOCATION` | región del registry (ej. `us-central1-docker.pkg.dev`) |
+| `REGION` | región GCP (ej. `us-central1`) |
+| `GCP_PROJECT` | proyecto del entorno (`data-lake-<env>`) |
+
+`staging` y `prod` deben configurar **required reviewers** para gatear el deploy.
 
 ## Flujo completo
 
@@ -90,8 +101,9 @@ flowchart LR
     B --> C{"quality gates<br/>pass?"}
     C -- "sí" --> D["merge a main"]
     C -- "no" --> E["bloquea merge"]
-    D --> F["build.yml<br/>(pendiente)"]
-    F --> G["Artifact Registry<br/>account:sha256-..."]
-    G --> H["deploy.yml<br/>(pendiente)"]
-    H --> I["Cloud Run Job<br/>(dev → staging → prod)"]
+    D --> F["build.yml<br/>build once + push dev"]
+    F --> G["Artifact Registry dev<br/>account@sha256:…"]
+    G --> H["deploy a dev<br/>(automático)"]
+    H --> I["deploy.yml<br/>promote por digest"]
+    I --> J["staging → prod<br/>(gate manual)"]
 ```

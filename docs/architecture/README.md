@@ -204,9 +204,9 @@ flowchart LR
     B --> C{"quality gates<br/>pass?"}
     C -- "sí" --> D["merge a main"]
     C -- "no" --> E["bloquea merge"]
-    D --> F["build.yml<br/>(pendiente — IaC)"]
-    F --> G["Artifact Registry<br/>account:sha256-..."]
-    G --> H["deploy.yml<br/>(pendiente — IaC)"]
+    D --> F["build.yml<br/>build once + push dev"]
+    F --> G["Artifact Registry<br/>account@sha256:..."]
+    G --> H["deploy.yml<br/>promote por digest"]
     H --> I["Cloud Run Job<br/>(dev → staging → prod)"]
 ```
 
@@ -217,10 +217,12 @@ flowchart LR
 - **Tag por digest inmutable** para trazabilidad y rollback determinístico.
 - **Contexto de build = raíz del repositorio**, porque la imagen necesita copiar
   tanto `packages/common` como el job.
-- `build.yml` y `deploy.yml` son workflows pendientes, definidos en el repositorio
-  de infraestructura separado.
-- La **infraestructura como código** (definición de los Cloud Run Jobs,
-  scheduler, datasets) vive en un repositorio de infraestructura separado.
+- `build.yml` y `deploy.yml` viven en **este** repositorio (tienen el código y el
+  Dockerfile); autentican a GCP por Workload Identity Federation y deployan vía
+  `gcloud run jobs update` (pipeline-driven). Ver [`ops/ci-cd.md`](../ops/ci-cd.md).
+- La **infraestructura como código** (Cloud Run Jobs, scheduler, datasets,
+  Artifact Registry, identidad de deploy) vive en un repositorio de
+  infraestructura separado.
 
 ## Estado de implementación
 
@@ -238,5 +240,5 @@ flowchart LR
 | Build distroless (multi-stage, `.dockerignore` strips dev) | Implementado |
 | CI: quality gates en GitHub Actions (`ci.yml`) | Implementado |
 | Release: `cz bump` + changelog (`release.yml`) | Implementado |
+| `build.yml` / `deploy.yml` (build once, promote por digest, WIF) | Implementado |
 | Capa Silver (deduplicación, `BQ_DATASET_SILVER`, materializador) | Diseñado, pendiente |
-| `build.yml` / `deploy.yml` (workflows de build y deploy) | Pendiente (IaC) |
