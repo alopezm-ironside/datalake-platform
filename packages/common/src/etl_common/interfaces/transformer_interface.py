@@ -1,64 +1,41 @@
+"""Transformer port — converts raw source dicts into typed domain entities.
+
+The old dict-tuple API (transform_record / transform_related_records /
+transform_batch) is replaced by a single transform() method that returns
+a typed list of domain entities. Validation logic moves to the concrete
+transformer as a private method.
+
+Concrete implementations are updated in Change 1 → Phase 6 (jobs/account).
+"""
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple
+from typing import Any, Generic, TypeVar
+
+T = TypeVar("T")
 
 
-class TransformerInterface(ABC):
+class TransformerInterface(ABC, Generic[T]):
+    """Abstract transformer: raw source dicts → typed domain entities.
+
+    The SyncPipeline calls transform(raw_batch) once per batch and passes
+    the resulting list[T] directly to RepositoryInterface.save_batch().
     """
-    Interface para servicios de transformación de datos.
-
-    Transforma datos raw del sistema fuente a formato del destino.
-    """
 
     @abstractmethod
-    def transform_record(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Transforma un registro individual.
+    def transform(self, raw_batch: list[dict[str, Any]]) -> list[T]:
+        """Transform a batch of raw source records into domain entities.
 
         Args:
-            raw_data: Datos raw del sistema fuente
+            raw_batch: List of raw dicts from the extractor.
 
         Returns:
-            Diccionario transformado listo para el destino
+            List of typed domain entities (not dicts).
         """
-        pass
-
-    @abstractmethod
-    def transform_related_records(
-        self,
-        raw_data: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Transforma registros relacionados (ej: líneas de un movimiento).
-
-        Args:
-            raw_data: Datos raw que contienen relaciones
-
-        Returns:
-            Lista de registros relacionados transformados
-        """
-        pass
-
-    @abstractmethod
-    def transform_batch(
-        self,
-        raw_batch: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        Transforma un batch completo de registros principales y relacionados.
-
-        Args:
-            raw_batch: Lista de registros raw
-
-        Returns:
-            Tupla (registros_principales, registros_relacionados)
-        """
-        pass
 
 
 class ValidationInterface(ABC):
     """Interface para validación de datos transformados."""
 
     @abstractmethod
-    def validate(self, data: Dict[str, Any]) -> bool:
+    def validate(self, data: dict[str, Any]) -> bool:
         """Valida que un registro cumpla reglas de negocio."""
-        pass

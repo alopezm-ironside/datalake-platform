@@ -1,16 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any
 
 
 class ExtractorInterface(ABC):
     """
     Interface para servicios de extracción de datos.
 
-    Cualquier implementación (Odoo, SAP, API REST, CSV, etc.) debe cumplir este contrato.
+    Cualquier implementación (Odoo, SAP, API REST, CSV, etc.) debe cumplir el contrato.
     """
 
     @abstractmethod
-    def fetch_new_ids(self, last_processed_id: int = 0) -> List[int]:
+    def fetch_new_ids(self, last_processed_id: int = 0) -> list[int]:
         """
         Obtiene IDs de registros nuevos desde el último procesado.
 
@@ -23,7 +23,7 @@ class ExtractorInterface(ABC):
         pass
 
     @abstractmethod
-    def fetch_batch(self, ids: List[int]) -> List[Dict[str, Any]]:
+    def fetch_batch(self, ids: list[int]) -> list[dict[str, Any]]:
         """
         Obtiene datos completos de un batch de registros.
 
@@ -50,6 +50,6 @@ class TaxCacheInterface(ABC):
     """Interface para cachear información auxiliar (como impuestos)."""
 
     @abstractmethod
-    def get_tax_rate(self, tax_ids: List[int]) -> float:
+    def get_tax_rate(self, tax_ids: list[int]) -> float:
         """Obtiene la tasa de impuesto."""
         pass

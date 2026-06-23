@@ -8,6 +8,7 @@ dependencies = [
     "sqlalchemy>=2.0.45",
     "sqlalchemy-bigquery>=1.16.0",
     "google-cloud-bigquery>=3.40.0",
+    "structlog>=24.1.0",
 ]
 
 [project.optional-dependencies]
