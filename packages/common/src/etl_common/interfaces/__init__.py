@@ -12,7 +12,8 @@ from etl_common.interfaces.extractor_interface import (
 from etl_common.interfaces.loader_interface import ConnectionInterface, LoaderInterface
 from etl_common.interfaces.repository_interface import RepositoryInterface
 from etl_common.interfaces.sync_app_interface import SyncAppInterface
-from etl_common.interfaces.sync_state_interface import SyncStateInterface, SyncStats
+from etl_common.interfaces.sync_state_interface import SyncStateInterface
+from etl_common.interfaces.sync_stats import SyncStats
 from etl_common.interfaces.transformer_interface import (
     TransformerInterface,
     ValidationInterface,
