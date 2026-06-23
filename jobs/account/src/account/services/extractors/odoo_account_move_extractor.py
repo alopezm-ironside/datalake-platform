@@ -1,15 +1,17 @@
-import logging
+"""Odoo XML-RPC adapter for account.move extraction."""
+
 from typing import Any, ClassVar
 
+import structlog
 from etl_common.infrastructure.odoo_manager import OdooManager
 from etl_common.interfaces.extractor_interface import ExtractorInterface
 from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
 
-_logger = logging.getLogger(__name__)
+_log = structlog.get_logger(__name__)
 
 
 class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
-    """Extrae account.move y sus líneas desde Odoo vía XML-RPC."""
+    """Extracts account.move records and their lines from Odoo via XML-RPC."""
 
     MOVE_FIELDS: ClassVar[list[str]] = [
         "id",
@@ -54,17 +56,15 @@ class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
         return "odoo"
 
     def fetch_new_ids(self, last_processed_id: int = 0) -> list[int]:
-        _logger.info(f"🔍 Buscando movimientos desde ID: {last_processed_id}")
         domain = [("id", ">", last_processed_id), ("line_ids", "!=", False)]
         move_ids = self.odoo.search("account.move", domain, order="id asc")
-        _logger.info(f"✅ Encontrados {len(move_ids)} movimientos nuevos")
+        _log.info("ids_fetched", count=len(move_ids), watermark=last_processed_id)
         return move_ids
 
     def fetch_batch(self, ids: list[int]) -> list[dict[str, Any]]:
         if not ids:
             return []
 
-        _logger.info(f"📥 Extrayendo {len(ids)} movimientos...")
         moves = self.odoo.read("account.move", ids, self.MOVE_FIELDS)
 
         all_line_ids: list[int] = []
@@ -73,7 +73,6 @@ class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
 
         lines_data: list[dict[str, Any]] = []
         if all_line_ids:
-            _logger.info(f"📥 Extrayendo {len(all_line_ids)} líneas...")
             lines_data = self.odoo.read(
                 "account.move.line", all_line_ids, self.LINE_FIELDS
             )
@@ -89,7 +88,7 @@ class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
         for move in moves:
             move["_lines"] = lines_by_move.get(move["id"], [])
 
-        _logger.info(f"✅ Extraídos {len(moves)} movimientos con líneas")
+        _log.info("batch_extracted", moves=len(moves), lines=len(lines_data))
         return moves
 
     def _prefetch_taxes(self, lines: list[dict[str, Any]]) -> None:
@@ -101,13 +100,12 @@ class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
         if not missing_tax_ids:
             return
 
-        _logger.info(f"📥 Pre-cargando {len(missing_tax_ids)} impuestos...")
         try:
             taxes = self.odoo.read("account.tax", missing_tax_ids, ["id", "amount"])
             for tax in taxes:
                 self.tax_cache[tax["id"]] = tax
-        except Exception as e:
-            _logger.warning(f"⚠️ Error cargando impuestos: {e}")
+        except Exception as exc:
+            _log.warning("tax_prefetch_failed", error=str(exc))
 
     def get_tax_rate(self, tax_ids: list[int]) -> float:
         if not tax_ids:

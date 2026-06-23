@@ -26,6 +26,7 @@ python_files = ["test_*.py"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+plugins = ["pydantic.mypy"]
 explicit_package_bases = true
 ignore_missing_imports = true
 mypy_path = "packages/common/src:jobs/account/src"
