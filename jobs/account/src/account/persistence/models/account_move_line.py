@@ -13,15 +13,16 @@ if TYPE_CHECKING:
 
 
 class AccountMoveLineORM(Base):
-    """ORM model for the odoo_raw.account_move_lines Bronze table.
+    """ORM model for the account_move_lines Bronze table.
 
     synced_at is stamped by the repository at write time — not at class
     definition time — to ensure each batch gets a distinct load timestamp.
     """
 
-    __tablename__ = "odoo_raw.account_move_lines"
+    __tablename__ = "account_move_lines"
 
     __table_args__ = {  # noqa: RUF012
+        "schema": "raw",
         "bigquery_time_partitioning": TimePartitioning(field="date", type_="MONTH"),
         "bigquery_require_partition_filter": True,
         "bigquery_clustering_fields": ["account_move_id", "account_id", "product_id"],
@@ -57,7 +58,7 @@ class AccountMoveLineORM(Base):
 
     account_move_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("odoo_raw.account_moves.id", name="fk_account_move"),
+        ForeignKey("raw.account_moves.id", name="fk_account_move"),
         nullable=False,
     )
 

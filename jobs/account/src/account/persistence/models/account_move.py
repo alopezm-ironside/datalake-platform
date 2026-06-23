@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class AccountMoveORM(Base):
-    """ORM model for the odoo_raw.account_moves Bronze table.
+    """ORM model for the account_moves Bronze table.
 
     synced_at is intentionally NOT set via a class-level default — the
     repository stamps it at write time so each batch gets a distinct
@@ -21,9 +21,10 @@ class AccountMoveORM(Base):
     process share the same import-time datetime).
     """
 
-    __tablename__ = "odoo_raw.account_moves"
+    __tablename__ = "account_moves"
 
     __table_args__ = {  # noqa: RUF012
+        "schema": "raw",
         "bigquery_time_partitioning": TimePartitioning(field="date", type_="MONTH"),
         "bigquery_clustering_fields": ["partner_name", "move_type", "state"],
         "bigquery_require_partition_filter": True,
