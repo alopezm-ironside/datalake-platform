@@ -89,6 +89,14 @@ def test_save_batch_calls_add_all_and_commit():
     mock_session.commit.assert_called_once()
 
 
+def test_save_batch_raises_when_sync_batch_id_unbound():
+    """save_batch fails loud (no silent empty) if sync_batch_id is not bound."""
+    repo, _, _ = _mock_repo()
+    # conftest clears contextvars before each test → sync_batch_id is unbound.
+    with pytest.raises(RuntimeError, match="sync_batch_id"):
+        repo.save_batch([_make_move(1)])
+
+
 def test_save_batch_stamps_synced_at_and_sync_batch_id():
     """ORM rows carry synced_at (set by repo) and sync_batch_id; entity unchanged."""
     from account.persistence.repositories.bigquery_account_move_repository import (

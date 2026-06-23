@@ -30,9 +30,14 @@ class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):
 
     def save_batch(self, entities: list[AccountMove]) -> int:
         """Append all AccountMove aggregates and their lines in one transaction."""
-        sync_batch_id: str = structlog.contextvars.get_contextvars().get(
-            "sync_batch_id", ""
+        sync_batch_id: str | None = structlog.contextvars.get_contextvars().get(
+            "sync_batch_id"
         )
+        if not sync_batch_id:
+            raise RuntimeError(
+                "sync_batch_id is not bound to contextvars; SyncPipeline.run() "
+                "must bind it before calling save_batch."
+            )
         synced_at = datetime.now(timezone.utc)
         orm_rows: list[AccountMoveORM | AccountMoveLineORM] = []
         for entity in entities:
