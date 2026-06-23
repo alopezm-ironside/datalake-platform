@@ -5,9 +5,6 @@ un destino. Agregar uno consiste en proveer los adaptadores concretos de los
 cuatro ports y cablearlos; la orquestación (`SyncPipeline`) ya existe en
 `etl-common` y no se reescribe.
 
-> Este documento describe el flujo objetivo de la arquitectura. Ver el estado de
-> implementación en [`../architecture/README.md`](../architecture/README.md).
-
 ## 1. Crear el paquete del job
 
 ```
@@ -74,14 +71,30 @@ Para `Odoo → BigQuery` se reutilizan los adaptadores de infraestructura de
 `etl-common` (`OdooManager`, `BigQueryConnection`). Para un origen o destino
 nuevo, se implementa el adaptador correspondiente una sola vez.
 
-## 4. Cablear el entry point
-
-`__main__.py` construye los adaptadores y se los pasa al pipeline. No contiene
-lógica de orquestación.
+Cualquier adaptador o servicio que necesite logging importa desde el paquete raíz
+de observabilidad:
 
 ```python
+from etl_common.observability import get_logger
+
+logger = get_logger(__name__)
+```
+
+Nunca desde módulos de backend específicos (`GcpLogBackend`, `ConsoleLogBackend`).
+El backend se configura en el composition root; los adaptadores solo consumen el
+punto de acceso genérico.
+
+## 4. Cablear el entry point
+
+`__main__.py` configura la observabilidad, construye los adaptadores y se los pasa
+al pipeline. No contiene lógica de orquestación.
+
+```python
+from etl_common.observability import configure_logging, resolve_backend
+
 def main() -> None:
     settings = Settings()
+    configure_logging(resolve_backend(settings.LOG_BACKEND))
     # construir conexiones y adaptadores concretos...
     SyncPipeline(
         module_name="<modulo>",
@@ -91,6 +104,9 @@ def main() -> None:
         sync_state=...,
     ).run()
 ```
+
+`configure_logging` debe llamarse antes de construir cualquier adaptador, para
+garantizar que todos los loggers del proceso usen el mismo backend desde el inicio.
 
 Cambiar de destino (por ejemplo a Snowflake) se reduce a construir aquí otro
 `repository` y otro `sync_state`; `run()` no cambia.
@@ -105,7 +121,15 @@ del repositorio:
 docker build -f jobs/<modulo>/Dockerfile -t <registry>/<modulo>:<sha> .
 ```
 
-## 6. Verificación
+## 6. Verificación local
+
+Instalar los hooks de git una vez por clon (prerequisito antes de que disparen):
+
+```bash
+uv run lefthook install
+```
+
+Luego, verificar el nuevo módulo completo:
 
 ```bash
 uv lock
@@ -114,4 +138,27 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 uv run --package etl-<modulo> <modulo>-job   # requiere variables de entorno
+```
+
+## 7. Tests
+
+El workspace usa **pytest** con **pytest-randomly**: el orden de ejecución de los
+tests es aleatorio por defecto. Esto detecta dependencias de estado entre tests
+que un orden fijo ocultaría.
+
+El `conftest.py` en la raíz del repositorio reinicia el estado global entre cada
+test (singleton de `BigQueryConnection` y sentinel de observabilidad). No se
+requiere ninguna acción adicional en los tests del módulo nuevo.
+
+Para reproducir una falla con el mismo orden de ejecución:
+
+```bash
+uv run pytest -p randomly --randomly-seed=last
+```
+
+`--randomly-seed=last` reutiliza la semilla del último run. Para un seed
+específico (que pytest imprime al inicio del run):
+
+```bash
+uv run pytest -p randomly --randomly-seed=<numero>
 ```

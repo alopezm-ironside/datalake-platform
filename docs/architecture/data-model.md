@@ -6,11 +6,11 @@ El motor organiza los datos según el patrón **medallion** (Bronze → Silver �
 Gold), que mejora progresivamente la estructura y calidad de los datos a medida
 que fluyen entre capas.
 
-| Capa | Qué es | Foco |
-|---|---|---|
-| **Bronze** | Datos del origen "as-is" + metadata de ingesta | Archivo histórico, linaje, auditoría, reproceso sin releer el origen |
-| **Silver** | Limpios, conformados y **no duplicados** ("just-enough") | Vista por entidad, self-service analytics, ad-hoc |
-| **Gold** | De-normalizado, read-optimized (star schema / data marts) | Presentación para reporting de proyectos específicos |
+| Capa       | Qué es                                                    | Foco                                                                 |
+| ---------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Bronze** | Datos del origen "as-is" + metadata de ingesta            | Archivo histórico, linaje, auditoría, reproceso sin releer el origen |
+| **Silver** | Limpios, conformados y **no duplicados** ("just-enough")  | Vista por entidad, self-service analytics, ad-hoc                    |
+| **Gold**   | De-normalizado, read-optimized (star schema / data marts) | Presentación para reporting de proyectos específicos                 |
 
 **Alcance del motor: produce Bronze y Silver.** Gold es modelado downstream y
 opcional (ver más abajo). Por cada entidad de dominio se materializan dos tablas:
@@ -29,9 +29,9 @@ sistema de origen.
 
 Columnas de metadata presentes en cada fila:
 
-| Columna | Significado |
-|---|---|
-| `synced_at` | Timestamp de ingesta de esa versión (load date/time) |
+| Columna         | Significado                                             |
+| --------------- | ------------------------------------------------------- |
+| `synced_at`     | Timestamp de ingesta de esa versión (load date/time)    |
 | `sync_batch_id` | Identificador de la corrida que la insertó (process ID) |
 
 Estas columnas solo tienen sentido en un modelo versionado: son la base de la
@@ -96,21 +96,33 @@ suficiente y habitual.
 Una tabla transversal a todos los módulos registra la metadata de cada
 sincronización:
 
-`control.sync_metadata` — una fila por corrida: módulo, tipo, inicio/fin, estado
-(`running` / `success` / `failed`), watermark (`last_processed_id`), conteos de
-registros, llamadas a APIs y mensaje de error. Es la fuente del watermark y la
-base de observabilidad de las ejecuciones.
+`<BQ_DATASET_CONTROL>.sync_metadata` — una fila por corrida: módulo, tipo,
+inicio/fin, estado (`running` / `success` / `failed`), watermark
+(`last_processed_id`), conteos de registros, llamadas a APIs y mensaje de error.
+Es la fuente del watermark y la base de observabilidad de las ejecuciones.
+
+> `control` es el token simbólico del ORM. En tiempo de ejecución se resuelve al
+> valor de `BQ_DATASET_CONTROL` vía `schema_translate_map`. El nombre real del
+> dataset lo define el IaC y se inyecta como variable de entorno.
 
 ## Organización en datasets de BigQuery
 
-| Dataset | Capa | Variable |
-|---|---|---|
-| `odoo_raw` | Bronze (append) | `BQ_DATASET_RAW` |
-| *(a definir)* | Silver (deduplicada) | *(a definir)* |
-| `control` | Plano de control (`sync_metadata`) | `BQ_DATASET_CONTROL` |
+| Dataset (nombre real) | Token ORM | Capa | Variable de entorno |
+| --------------------- | --------- | ---- | ------------------- |
+| p. ej. `datalake_odoo_raw` | `raw` | Bronze (append) | `BQ_DATASET_RAW` |
+| _(pendiente de implementación)_ | _(a definir)_ | Silver (deduplicada) | _(a definir)_ |
+| p. ej. `datalake_control` | `control` | Plano de control (`sync_metadata`) | `BQ_DATASET_CONTROL` |
+
+> Los datasets son provistos por el IaC. La aplicación **no los crea**. El
+> conector `BigQueryConnection` recibe los nombres reales vía `BQ_DATASET_RAW` y
+> `BQ_DATASET_CONTROL` y aplica `schema_translate_map` en tiempo de ejecución.
+> Los modelos ORM usan los tokens simbólicos (`"raw"`, `"control"`) en
+> `__table_args__`; SQLAlchemy sustituye el token por el nombre real del dataset
+> al construir las consultas.
 
 > Silver requiere un dataset propio y, por lo tanto, una variable de configuración
-> adicional. Queda por definir su nombre (por ejemplo `odoo_clean` o `analytics`).
+> adicional (`BQ_DATASET_SILVER`). Queda por definir su nombre (por ejemplo
+> `datalake_odoo_clean` o `datalake_analytics`).
 
 ## Consumo desde BI
 
