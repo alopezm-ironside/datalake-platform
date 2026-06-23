@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+import structlog
 from etl_common.infrastructure.bigquery_connection import BigQueryConnection
 from etl_common.interfaces.repository_interface import RepositoryInterface
 from sqlalchemy.orm import Session
@@ -10,24 +11,32 @@ from account.domain.account_move import AccountMove
 from account.persistence.models.account_move import AccountMoveORM
 from account.persistence.models.account_move_line import AccountMoveLineORM
 
+_log = structlog.get_logger(__name__)
+
 
 class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):
     """Appends AccountMove aggregates (header + lines) to BigQuery Bronze.
 
     Owns its SQLAlchemy Session; commits data in save_batch and rolls back
     on any failure before re-raising so the pipeline can record the error.
+
+    sync_batch_id is read from structlog contextvars at write time — the
+    pipeline binds it via bind_contextvars before calling save_batch, so
+    every ORM row carries the run's batch id without polluting the interface.
     """
 
-    def __init__(self, connection: BigQueryConnection, sync_batch_id: str) -> None:
+    def __init__(self, connection: BigQueryConnection) -> None:
         self._engine = connection.engine
-        self._sync_batch_id = sync_batch_id
 
     def save_batch(self, entities: list[AccountMove]) -> int:
         """Append all AccountMove aggregates and their lines in one transaction."""
+        sync_batch_id: str = structlog.contextvars.get_contextvars().get(
+            "sync_batch_id", ""
+        )
         synced_at = datetime.now(timezone.utc)
         orm_rows: list[AccountMoveORM | AccountMoveLineORM] = []
         for entity in entities:
-            orm_rows.extend(self._to_orm(entity, synced_at))
+            orm_rows.extend(self._to_orm(entity, synced_at, sync_batch_id))
 
         with Session(self._engine) as session:
             try:
@@ -40,7 +49,7 @@ class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):
         return len(entities)
 
     def _to_orm(
-        self, entity: AccountMove, synced_at: datetime
+        self, entity: AccountMove, synced_at: datetime, sync_batch_id: str
     ) -> list[AccountMoveORM | AccountMoveLineORM]:
         """Map one AccountMove entity (+ lines) to ORM rows, stamping metadata."""
         move_orm = AccountMoveORM(
@@ -62,7 +71,7 @@ class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):
             payment_state=entity.payment_state,
             ref=entity.ref,
             synced_at=synced_at,
-            sync_batch_id=self._sync_batch_id,
+            sync_batch_id=sync_batch_id,
         )
         rows: list[AccountMoveORM | AccountMoveLineORM] = [move_orm]
         for line in entity.lines:
@@ -86,7 +95,7 @@ class BigQueryAccountMoveRepository(RepositoryInterface[AccountMove]):
                     tax_rate=line.tax_rate,
                     tax_amount=line.tax_amount,
                     synced_at=synced_at,
-                    sync_batch_id=self._sync_batch_id,
+                    sync_batch_id=sync_batch_id,
                 )
             )
         return rows

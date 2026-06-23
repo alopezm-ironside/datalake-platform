@@ -1,12 +1,14 @@
 """Tests for BigQueryAccountMoveRepository (Phase 5 — Change 2).
 
 All BigQuery/SQLAlchemy I/O is mocked — no real connections.
+sync_batch_id is read from structlog contextvars; tests bind it explicitly.
 """
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+import structlog
 from account.domain.account_move import AccountMove
 from account.domain.account_move_line import AccountMoveLine
 
@@ -53,8 +55,8 @@ def _make_move(move_id: int = 1) -> AccountMove:
     )
 
 
-def test_save_batch_calls_add_all_and_commit():
-    """Repository calls session.add_all then session.commit for a batch."""
+def _mock_repo() -> tuple:
+    """Return (repo, mock_session, mock_connection) with Session patched."""
     from account.persistence.repositories.bigquery_account_move_repository import (
         BigQueryAccountMoveRepository,
     )
@@ -62,6 +64,13 @@ def test_save_batch_calls_add_all_and_commit():
     mock_session = MagicMock()
     mock_connection = MagicMock()
     mock_connection.engine = MagicMock()
+    repo = BigQueryAccountMoveRepository(connection=mock_connection)
+    return repo, mock_session, mock_connection
+
+
+def test_save_batch_calls_add_all_and_commit():
+    """Repository calls session.add_all then session.commit for a batch."""
+    repo, mock_session, _ = _mock_repo()
 
     with patch(
         "account.persistence.repositories.bigquery_account_move_repository.Session"
@@ -69,11 +78,12 @@ def test_save_batch_calls_add_all_and_commit():
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-001"
-        )
-        move = _make_move(1)
-        repo.save_batch([move])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-001")
+        try:
+            repo.save_batch([_make_move(1)])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     mock_session.add_all.assert_called_once()
     mock_session.commit.assert_called_once()
@@ -90,19 +100,22 @@ def test_save_batch_stamps_synced_at_and_sync_batch_id():
     mock_session.add_all.side_effect = lambda rows: captured_rows.extend(rows)
     mock_connection = MagicMock()
 
+    repo = BigQueryAccountMoveRepository(connection=mock_connection)
+
     with patch(
         "account.persistence.repositories.bigquery_account_move_repository.Session"
     ) as mock_session_cls:
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-42"
-        )
-        move = _make_move(1)
-        original_id = move.id
-
-        repo.save_batch([move])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-42")
+        try:
+            move = _make_move(1)
+            original_id = move.id
+            repo.save_batch([move])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     # Domain entity not mutated
     assert move.id == original_id
@@ -136,6 +149,8 @@ def test_save_batch_stamps_distinct_synced_at_per_call():
     t1 = datetime(2024, 1, 1, tzinfo=timezone.utc)
     t2 = datetime(2024, 1, 1, 0, 5, tzinfo=timezone.utc)
 
+    repo = BigQueryAccountMoveRepository(connection=MagicMock())
+
     with (
         patch(
             "account.persistence.repositories.bigquery_account_move_repository.Session"
@@ -148,12 +163,14 @@ def test_save_batch_stamps_distinct_synced_at_per_call():
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
         mock_dt.now.side_effect = [t1, t2]
 
-        repo = BigQueryAccountMoveRepository(
-            connection=MagicMock(), sync_batch_id="batch-A"
-        )
-        move = _make_move(1)
-        repo.save_batch([move])
-        repo.save_batch([move])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-A")
+        try:
+            move = _make_move(1)
+            repo.save_batch([move])
+            repo.save_batch([move])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     assert captured == [t1, t2]
 
@@ -169,18 +186,22 @@ def test_save_batch_append_produces_two_rows_for_same_entity():
     mock_session.add_all.side_effect = lambda rows: add_all_calls.append(list(rows))
     mock_connection = MagicMock()
 
+    repo = BigQueryAccountMoveRepository(connection=mock_connection)
+
     with patch(
         "account.persistence.repositories.bigquery_account_move_repository.Session"
     ) as mock_session_cls:
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-B"
-        )
-        move = _make_move(42)
-        repo.save_batch([move])
-        repo.save_batch([move])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-B")
+        try:
+            move = _make_move(42)
+            repo.save_batch([move])
+            repo.save_batch([move])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     assert mock_session.commit.call_count == 2
     assert len(add_all_calls) == 2
@@ -196,17 +217,21 @@ def test_save_batch_error_triggers_rollback_and_reraises():
     mock_session.commit.side_effect = RuntimeError("BQ write failed")
     mock_connection = MagicMock()
 
+    repo = BigQueryAccountMoveRepository(connection=mock_connection)
+
     with patch(
         "account.persistence.repositories.bigquery_account_move_repository.Session"
     ) as mock_session_cls:
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-err"
-        )
-        with pytest.raises(RuntimeError, match="BQ write failed"):
-            repo.save_batch([_make_move(1)])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-err")
+        try:
+            with pytest.raises(RuntimeError, match="BQ write failed"):
+                repo.save_batch([_make_move(1)])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     mock_session.rollback.assert_called_once()
 
@@ -220,15 +245,19 @@ def test_save_batch_returns_entity_count():
     mock_session = MagicMock()
     mock_connection = MagicMock()
 
+    repo = BigQueryAccountMoveRepository(connection=mock_connection)
+
     with patch(
         "account.persistence.repositories.bigquery_account_move_repository.Session"
     ) as mock_session_cls:
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-count"
-        )
-        result = repo.save_batch([_make_move(1), _make_move(2)])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(sync_batch_id="batch-count")
+        try:
+            result = repo.save_batch([_make_move(1), _make_move(2)])
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     assert result == 2
