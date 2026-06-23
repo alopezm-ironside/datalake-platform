@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
-
 
 class ExtractorInterface(ABC):
     """Interface for source data extraction adapters (Odoo, SAP, REST API, CSV…)."""
@@ -20,4 +18,4 @@ class ExtractorInterface(ABC):
         """Return a short identifier for the source system (e.g. 'odoo')."""
 
 
-__all__ = ["ExtractorInterface", "TaxCacheInterface"]
+__all__ = ["ExtractorInterface"]
