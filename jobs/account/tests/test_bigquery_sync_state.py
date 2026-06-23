@@ -36,6 +36,9 @@ def test_get_watermark_returns_last_processed_id_from_success_run():
         result = state.get_watermark("accounting")
 
     assert result == 500
+    status_clause = query_chain.filter.call_args[0][0]
+    assert "status" in str(status_clause)
+    assert status_clause.right.value == "success"
 
 
 def test_get_watermark_returns_zero_when_no_success_run():

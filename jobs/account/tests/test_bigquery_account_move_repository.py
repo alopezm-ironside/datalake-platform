@@ -120,41 +120,42 @@ def test_save_batch_stamps_synced_at_and_sync_batch_id():
     assert isinstance(orm_move.synced_at, datetime)
 
 
-def test_save_batch_synced_at_is_not_import_time_constant():
-    """synced_at must be stamped at write time, not at class definition time."""
+def test_save_batch_stamps_distinct_synced_at_per_call():
+    """Each save_batch stamps a fresh synced_at — two calls yield two distinct
+    values, proving the timestamp is taken at write time, not at import time."""
     from account.persistence.repositories.bigquery_account_move_repository import (
         BigQueryAccountMoveRepository,
     )
 
-    timestamps: list[datetime] = []
-
-    def capture_rows(rows: list) -> None:
-        for row in rows:
-            if hasattr(row, "synced_at") and isinstance(row.synced_at, datetime):
-                timestamps.append(row.synced_at)
-
+    captured: list[datetime] = []
     mock_session = MagicMock()
-    mock_session.add_all.side_effect = capture_rows
-    mock_connection = MagicMock()
+    mock_session.add_all.side_effect = lambda rows: captured.extend(
+        r.synced_at for r in rows if not hasattr(r, "account_move_id")
+    )
 
-    with patch(
-        "account.persistence.repositories.bigquery_account_move_repository.Session"
-    ) as mock_session_cls:
+    t1 = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    t2 = datetime(2024, 1, 1, 0, 5, tzinfo=timezone.utc)
+
+    with (
+        patch(
+            "account.persistence.repositories.bigquery_account_move_repository.Session"
+        ) as mock_session_cls,
+        patch(
+            "account.persistence.repositories.bigquery_account_move_repository.datetime"
+        ) as mock_dt,
+    ):
         mock_session_cls.return_value.__enter__ = lambda s: mock_session
         mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_dt.now.side_effect = [t1, t2]
 
         repo = BigQueryAccountMoveRepository(
-            connection=mock_connection, sync_batch_id="batch-A"
+            connection=MagicMock(), sync_batch_id="batch-A"
         )
-        repo.save_batch([_make_move(1)])
+        move = _make_move(1)
+        repo.save_batch([move])
+        repo.save_batch([move])
 
-    assert timestamps, "No datetime-typed synced_at found"
-    # All timestamps must be recent (not from import time ~minutes ago)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    for ts in timestamps:
-        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
-        diff = abs((now - ts_naive).total_seconds())
-        assert diff < 60, f"synced_at looks like an import-time constant: {ts}"
+    assert captured == [t1, t2]
 
 
 def test_save_batch_append_produces_two_rows_for_same_entity():
