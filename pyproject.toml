@@ -8,6 +8,7 @@ dev = [
     "mypy>=1.13.0",
     "lefthook>=2.1.9",
     "commitizen>=4.16.4",
+    "pytest-randomly>=4.1.0",
 ]
 
 [tool.ruff]
