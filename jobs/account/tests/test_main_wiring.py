@@ -22,8 +22,8 @@ def _mock_settings() -> MagicMock:
     mock.GOOGLE_PROJECT_ID = "proj"
     mock.GOOGLE_CREDENTIAL_SERVICE_FILE = "/creds.json"
     mock.GOOGLE_LOCATION = "us-central1"
-    mock.BQ_DATASET_RAW = "odoo_raw"
-    mock.BQ_DATASET_CONTROL = "control"
+    mock.BQ_DATASET_RAW = "datalake_odoo_raw"
+    mock.BQ_DATASET_CONTROL = "datalake_control"
     mock.LOG_BACKEND = "gcp"
     mock.BATCH_SIZE = 1000
     return mock
@@ -57,6 +57,88 @@ def test_main_wires_pipeline_and_calls_run() -> None:
         main()
 
     mock_pipeline.run.assert_called_once()
+
+
+def test_main_does_not_call_create_dataset() -> None:
+    """create_dataset_if_not_exists must NOT be called — datasets are IaC-owned."""
+    mock_pipeline = MagicMock()
+    mock_connection = MagicMock()
+
+    with (
+        patch("account.__main__.Settings", return_value=_mock_settings()),
+        patch("account.__main__.configure_logging"),
+        patch("account.__main__.resolve_backend"),
+        patch("account.__main__.OdooManager"),
+        patch("account.__main__.BigQueryConnection", return_value=mock_connection),
+        patch("account.__main__.OdooAccountMoveExtractor"),
+        patch("account.__main__.AccountMoveTransformer"),
+        patch("account.__main__.BigQueryAccountMoveRepository"),
+        patch("account.__main__.BigQuerySyncState"),
+        patch("account.__main__.SyncPipeline", return_value=mock_pipeline),
+    ):
+        from account.__main__ import main
+
+        main()
+
+    assert not mock_connection.create_dataset_if_not_exists.called, (
+        "create_dataset_if_not_exists must never be called from __main__"
+    )
+
+
+def test_main_constructs_bigquery_connection_with_dataset_params() -> None:
+    """BigQueryConnection must be constructed with raw_dataset and control_dataset."""
+    mock_pipeline = MagicMock()
+    settings = _mock_settings()
+
+    with (
+        patch("account.__main__.Settings", return_value=settings),
+        patch("account.__main__.configure_logging"),
+        patch("account.__main__.resolve_backend"),
+        patch("account.__main__.OdooManager"),
+        patch("account.__main__.BigQueryConnection") as mock_bq_cls,
+        patch("account.__main__.OdooAccountMoveExtractor"),
+        patch("account.__main__.AccountMoveTransformer"),
+        patch("account.__main__.BigQueryAccountMoveRepository"),
+        patch("account.__main__.BigQuerySyncState"),
+        patch("account.__main__.SyncPipeline", return_value=mock_pipeline),
+    ):
+        mock_bq_cls.return_value = MagicMock()
+
+        from account.__main__ import main
+
+        main()
+
+    _args, kwargs = mock_bq_cls.call_args
+    assert kwargs.get("raw_dataset") == settings.BQ_DATASET_RAW, (
+        f"raw_dataset not passed to BigQueryConnection: {kwargs}"
+    )
+    assert kwargs.get("control_dataset") == settings.BQ_DATASET_CONTROL, (
+        f"control_dataset not passed to BigQueryConnection: {kwargs}"
+    )
+
+
+def test_main_calls_create_tables() -> None:
+    """create_tables() must still be called to provision app-owned tables."""
+    mock_pipeline = MagicMock()
+    mock_connection = MagicMock()
+
+    with (
+        patch("account.__main__.Settings", return_value=_mock_settings()),
+        patch("account.__main__.configure_logging"),
+        patch("account.__main__.resolve_backend"),
+        patch("account.__main__.OdooManager"),
+        patch("account.__main__.BigQueryConnection", return_value=mock_connection),
+        patch("account.__main__.OdooAccountMoveExtractor"),
+        patch("account.__main__.AccountMoveTransformer"),
+        patch("account.__main__.BigQueryAccountMoveRepository"),
+        patch("account.__main__.BigQuerySyncState"),
+        patch("account.__main__.SyncPipeline", return_value=mock_pipeline),
+    ):
+        from account.__main__ import main
+
+        main()
+
+    mock_connection.create_tables.assert_called_once()
 
 
 def test_main_calls_configure_logging_before_adapters() -> None:

@@ -30,8 +30,8 @@ def test_bigquery_connection_has_no_run_tracking_methods() -> None:
 
 
 def test_bigquery_connection_exposes_only_ddl_surface() -> None:
-    """Expected public API: __init__, create_dataset_if_not_exists, create_tables."""
-    expected = {"create_dataset_if_not_exists", "create_tables"}
+    """Public API: create_tables only (create_dataset_if_not_exists removed)."""
+    expected = {"create_tables"}
     public = {
         name
         for name in dir(BigQueryConnection)

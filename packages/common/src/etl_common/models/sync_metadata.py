@@ -8,9 +8,10 @@ from etl_common.core.base import Base
 
 
 class SyncMetadata(Base):
-    __tablename__ = "control.sync_metadata"
+    __tablename__ = "sync_metadata"
 
     __table_args__ = {  # noqa: RUF012
+        "schema": "control",
         "bigquery_time_partitioning": TimePartitioning(
             field="started_at",
             type_="YEAR",

@@ -38,19 +38,15 @@ def main() -> None:
         project_id=settings.GOOGLE_PROJECT_ID,
         credentials=settings.GOOGLE_CREDENTIAL_SERVICE_FILE,
         location=settings.GOOGLE_LOCATION,
-    )
-    connection.create_dataset_if_not_exists(
-        settings.BQ_DATASET_RAW, description="Raw data from Odoo ERP"
-    )
-    connection.create_dataset_if_not_exists(
-        settings.BQ_DATASET_CONTROL, description="Sync control and metadata"
+        raw_dataset=settings.BQ_DATASET_RAW,
+        control_dataset=settings.BQ_DATASET_CONTROL,
     )
     connection.create_tables()
 
     extractor = OdooAccountMoveExtractor(odoo)
     transformer = AccountMoveTransformer(extractor)
     repository = BigQueryAccountMoveRepository(connection)
-    sync_state = BigQuerySyncState(connection, settings.BQ_DATASET_CONTROL)
+    sync_state = BigQuerySyncState(connection)
 
     SyncPipeline(
         module_name="accounting",
