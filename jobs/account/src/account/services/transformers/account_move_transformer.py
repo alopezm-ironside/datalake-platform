@@ -2,14 +2,14 @@
 
 from typing import Any
 
-import structlog
 from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
 from etl_common.interfaces.transformer_interface import TransformerInterface
+from etl_common.observability import get_logger
 
 from account.domain.account_move import AccountMove
 from account.domain.account_move_line import AccountMoveLine
 
-_log = structlog.get_logger(__name__)
+_log = get_logger(__name__)
 
 
 class AccountMoveTransformer(TransformerInterface[AccountMove]):

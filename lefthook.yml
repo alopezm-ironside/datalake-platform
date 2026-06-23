@@ -14,3 +14,11 @@ commit-msg:
   commands:
     commitizen:
       run: uv run cz check --commit-msg-file {1}
+
+pre-push:
+  parallel: true
+  commands:
+    mypy:
+      run: uv run mypy
+    pytest:
+      run: uv run pytest

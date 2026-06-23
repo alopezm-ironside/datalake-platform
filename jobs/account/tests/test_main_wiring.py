@@ -13,23 +13,30 @@ reached without import errors or wiring mistakes.
 from unittest.mock import MagicMock, patch
 
 
+def _mock_settings() -> MagicMock:
+    mock = MagicMock()
+    mock.ODOO_URL = "http://odoo"
+    mock.ODOO_DB = "db"
+    mock.ODOO_USER = "user"
+    mock.ODOO_PASSWORD = "pass"
+    mock.GOOGLE_PROJECT_ID = "proj"
+    mock.GOOGLE_CREDENTIAL_SERVICE_FILE = "/creds.json"
+    mock.GOOGLE_LOCATION = "us-central1"
+    mock.BQ_DATASET_RAW = "odoo_raw"
+    mock.BQ_DATASET_CONTROL = "control"
+    mock.LOG_BACKEND = "gcp"
+    mock.BATCH_SIZE = 1000
+    return mock
+
+
 def test_main_wires_pipeline_and_calls_run() -> None:
     """main() must reach SyncPipeline.run() when all I/O is mocked."""
-    mock_settings = MagicMock()
-    mock_settings.ODOO_URL = "http://odoo"
-    mock_settings.ODOO_DB = "db"
-    mock_settings.ODOO_USER = "user"
-    mock_settings.ODOO_PASSWORD = "pass"
-    mock_settings.GOOGLE_PROJECT_ID = "proj"
-    mock_settings.GOOGLE_CREDENTIAL_SERVICE_FILE = "/creds.json"
-    mock_settings.GOOGLE_LOCATION = "us-central1"
-    mock_settings.BQ_DATASET_RAW = "odoo_raw"
-    mock_settings.BQ_DATASET_CONTROL = "control"
-
     mock_pipeline = MagicMock()
 
     with (
-        patch("account.__main__.Settings", return_value=mock_settings),
+        patch("account.__main__.Settings", return_value=_mock_settings()),
+        patch("account.__main__.configure_logging"),
+        patch("account.__main__.resolve_backend"),
         patch("account.__main__.OdooManager") as mock_odoo_cls,
         patch("account.__main__.BigQueryConnection") as mock_bq_cls,
         patch("account.__main__.OdooAccountMoveExtractor") as mock_extractor_cls,
@@ -37,7 +44,6 @@ def test_main_wires_pipeline_and_calls_run() -> None:
         patch("account.__main__.BigQueryAccountMoveRepository") as mock_repo_cls,
         patch("account.__main__.BigQuerySyncState") as mock_state_cls,
         patch("account.__main__.SyncPipeline", return_value=mock_pipeline),
-        patch("account.__main__.configure_gcp_logging"),
     ):
         mock_odoo_cls.return_value = MagicMock()
         mock_bq_cls.return_value = MagicMock()
@@ -53,23 +59,12 @@ def test_main_wires_pipeline_and_calls_run() -> None:
     mock_pipeline.run.assert_called_once()
 
 
-def test_main_calls_configure_gcp_logging_first() -> None:
-    """configure_gcp_logging() must be called before any adapter is constructed."""
+def test_main_calls_configure_logging_before_adapters() -> None:
+    """configure_logging() must be called before any adapter is constructed."""
     call_order: list[str] = []
 
-    mock_settings = MagicMock()
-    mock_settings.ODOO_URL = "http://odoo"
-    mock_settings.ODOO_DB = "db"
-    mock_settings.ODOO_USER = "user"
-    mock_settings.ODOO_PASSWORD = "pass"
-    mock_settings.GOOGLE_PROJECT_ID = "proj"
-    mock_settings.GOOGLE_CREDENTIAL_SERVICE_FILE = "/creds.json"
-    mock_settings.GOOGLE_LOCATION = "us-central1"
-    mock_settings.BQ_DATASET_RAW = "odoo_raw"
-    mock_settings.BQ_DATASET_CONTROL = "control"
-
     def record(name: str):
-        def side_effect(*_a, **_kw):
+        def side_effect(*_a: object, **_kw: object) -> MagicMock:
             call_order.append(name)
             return MagicMock()
 
@@ -78,11 +73,12 @@ def test_main_calls_configure_gcp_logging_first() -> None:
     mock_pipeline = MagicMock()
 
     with (
-        patch("account.__main__.Settings", return_value=mock_settings),
+        patch("account.__main__.Settings", return_value=_mock_settings()),
         patch(
-            "account.__main__.configure_gcp_logging",
-            side_effect=lambda: call_order.append("configure_gcp_logging"),
+            "account.__main__.configure_logging",
+            side_effect=lambda _b: call_order.append("configure_logging"),
         ),
+        patch("account.__main__.resolve_backend", return_value=MagicMock()),
         patch("account.__main__.OdooManager", side_effect=record("OdooManager")),
         patch(
             "account.__main__.BigQueryConnection",
@@ -110,6 +106,6 @@ def test_main_calls_configure_gcp_logging_first() -> None:
 
         main()
 
-    assert call_order[0] == "configure_gcp_logging", (
-        f"configure_gcp_logging must be first, got: {call_order}"
+    assert call_order[0] == "configure_logging", (
+        f"configure_logging must be first adapter call, got: {call_order}"
     )

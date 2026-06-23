@@ -9,6 +9,7 @@ dev = [
     "lefthook>=2.1.9",
     "commitizen>=4.16.4",
     "pytest-randomly>=4.1.0",
+    "pyright>=1.1.410",
 ]
 
 [tool.ruff]
@@ -38,3 +39,4 @@ version = "0.1.0"
 version_scheme = "pep440"
 tag_format = "v$version"
 update_changelog_on_bump = true
+major_version_zero = true

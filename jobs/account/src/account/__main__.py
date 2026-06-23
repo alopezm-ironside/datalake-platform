@@ -7,7 +7,7 @@ directly by the container ENTRYPOINT.
 from etl_common.conf.settings import Settings
 from etl_common.infrastructure.bigquery_connection import BigQueryConnection
 from etl_common.infrastructure.odoo_manager import OdooManager
-from etl_common.observability.gcp_logging import configure_gcp_logging
+from etl_common.observability import configure_logging, resolve_backend
 from etl_common.sync_pipeline import SyncPipeline
 
 from account.persistence.repositories.bigquery_account_move_repository import (
@@ -23,9 +23,8 @@ from account.services.transformers.account_move_transformer import (
 
 
 def main() -> None:
-    configure_gcp_logging()
-
     settings = Settings()
+    configure_logging(resolve_backend(settings.LOG_BACKEND))
 
     odoo = OdooManager(
         url=settings.ODOO_URL,

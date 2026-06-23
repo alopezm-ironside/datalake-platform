@@ -12,11 +12,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sheets = [
-    "google-api-python-client>=2.187.0",
-    "google-auth>=2.41.1",
-    "google-auth-oauthlib>=1.2.3",
-]
 postgres = ["psycopg2-binary>=2.9.11"]
 
 [build-system]
