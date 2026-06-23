@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import TYPE_CHECKING
 
 from etl_common.core.base import Base
 from sqlalchemy import Date, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy_bigquery.base import TimePartitioning
+
+if TYPE_CHECKING:
+    from account.persistence.models.account_move_line import AccountMoveLineORM
 
 
 class AccountMoveORM(Base):
@@ -54,7 +58,7 @@ class AccountMoveORM(Base):
     )
     sync_batch_id: Mapped[str | None] = mapped_column(String)
 
-    line_ids: Mapped[list[AccountMoveLineORM]] = relationship(  # noqa: F821
+    line_ids: Mapped[list[AccountMoveLineORM]] = relationship(
         back_populates="account_move",
         cascade="all, delete-orphan",
         foreign_keys="AccountMoveLineORM.account_move_id",
