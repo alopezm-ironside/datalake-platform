@@ -117,9 +117,9 @@ consumo desde Metabase están en [`data-model.md`](data-model.md).
 
 ## Semántica de carga y resiliencia
 
-La carga es **append**, no upsert. Es un data lake: la capa cruda es un log
-inmutable de lo que el origen reportó y cuándo. La deduplicación a "estado actual"
-es una operación de lectura, materializada en la capa servida.
+La carga es **append**, no upsert. La capa cruda es un log inmutable de lo que el
+origen reportó y cuándo. La deduplicación a "estado actual" es una operación de
+lectura, materializada en la capa servida.
 
 Esta decisión, combinada con el checkpoint, otorga semántica **effectively-once**:
 
@@ -132,19 +132,82 @@ Esta decisión, combinada con el checkpoint, otorga semántica **effectively-onc
 - **El watermark es una optimización**, no un mecanismo de corrección: evita
   releer el origen. Si queda atrasado, el peor caso es reprocesar.
 
-Esto corrige el defecto del diseño anterior, donde los datos se comiteaban por
-lote pero el watermark solo avanzaba al finalizar con éxito: una interrupción
-dejaba datos persistidos con un watermark desactualizado, provocando relectura y
-duplicados por `INSERT`. Bajo el modelo append esos casos son versiones benignas.
+## Observabilidad — backend configurable
+
+La observabilidad sigue el mismo patrón ports-and-adapters que el resto del motor.
+El código de aplicación no conoce el backend de logging; solo conoce el contrato.
+
+| Símbolo | Rol |
+|---|---|
+| `LogBackend` (Protocol) | Contrato del port — cualquier backend lo cumple |
+| `GcpLogBackend` | Adaptador: JSON de una línea, compatible con Cloud Logging |
+| `ConsoleLogBackend` | Adaptador: salida legible para desarrollo local |
+| `configure_logging(backend)` | Registra el backend activo; idempotente |
+| `resolve_backend(name)` | Convierte el string del env var (`"gcp"` / `"console"`) en instancia |
+| `get_logger(name)` | Punto de acceso universal; todo el código lo usa |
+
+Todo el código de la aplicación importa exclusivamente desde el paquete raíz:
+
+```python
+from etl_common.observability import get_logger
+```
+
+Nunca desde módulos de backend específicos. El backend activo se determina en el
+composition root (`__main__.py`) antes de construir cualquier adaptador:
+
+```python
+from etl_common.observability import configure_logging, resolve_backend
+
+settings = Settings()
+configure_logging(resolve_backend(settings.LOG_BACKEND))
+```
+
+La variable `LOG_BACKEND` acepta `"gcp"` (default) o `"console"`. En producción
+(Cloud Run) el backend GCP emite JSON estructurado compatible con Cloud Logging.
+En desarrollo local se usa `console` para salida legible.
+
+## Propiedad de la infraestructura
+
+El motor aplica una separación estricta entre lo que crea el IaC y lo que crea la
+aplicación:
+
+| Recurso | Propietario | Mecanismo |
+|---|---|---|
+| Datasets de BigQuery | IaC | Terraform / IaC — la app nunca llama `create_dataset` |
+| Tablas de BigQuery | Aplicación | `BigQueryConnection.create_tables()` — único punto DDL |
+
+`BigQueryConnection` recibe los nombres reales de los datasets como parámetros
+(`raw_dataset`, `control_dataset`) y los registra en SQLAlchemy mediante
+`schema_translate_map`. Los modelos ORM usan tokens simbólicos en `__table_args__`:
+
+```python
+class AccountMoveORM(Base):
+    __table_args__ = {"schema": "raw", ...}   # "raw" → resuelve a BQ_DATASET_RAW
+
+class SyncMetadata(Base):
+    __table_args__ = {"schema": "control", ...}  # "control" → resuelve a BQ_DATASET_CONTROL
+```
+
+En tiempo de ejecución, SQLAlchemy sustituye el token por el nombre real del
+dataset. Esto desacopla los modelos ORM de los nombres de infraestructura: el mismo
+código funciona en cualquier entorno con solo cambiar las variables de entorno.
+
+**Principio:** la aplicación no crea nada que no le pertenezca. Los datasets son
+provistos por el IaC antes del primer deploy; la app asume que existen y solo
+materializa sus propias tablas.
 
 ## Despliegue
 
 ```mermaid
 flowchart LR
-    A["git push"] --> B["CI / Cloud Build<br/>docker build (contexto = raíz)"]
-    B --> C["Artifact Registry<br/>account:&lt;sha&gt;"]
-    C --> D["Cloud Run Job<br/>(referencia por digest)"]
-    D --> E["Ejecución<br/>(scheduler o on-demand)"]
+    A["git push / PR"] --> B["CI<br/>(GitHub Actions — ci.yml)"]
+    B --> C{"quality gates<br/>pass?"}
+    C -- "sí" --> D["merge a main"]
+    C -- "no" --> E["bloquea merge"]
+    D --> F["build.yml<br/>(pendiente — IaC)"]
+    F --> G["Artifact Registry<br/>account:sha256-..."]
+    G --> H["deploy.yml<br/>(pendiente — IaC)"]
+    H --> I["Cloud Run Job<br/>(dev → staging → prod)"]
 ```
 
 - **Imagen distroless** (multi-stage): el builder usa `python:3.11-slim` + `uv`
@@ -154,6 +217,8 @@ flowchart LR
 - **Tag por digest inmutable** para trazabilidad y rollback determinístico.
 - **Contexto de build = raíz del repositorio**, porque la imagen necesita copiar
   tanto `packages/common` como el job.
+- `build.yml` y `deploy.yml` son workflows pendientes, definidos en el repositorio
+  de infraestructura separado.
 - La **infraestructura como código** (definición de los Cloud Run Jobs,
   scheduler, datasets) vive en un repositorio de infraestructura separado.
 
@@ -161,14 +226,17 @@ flowchart LR
 
 | Componente | Estado |
 |---|---|
-| Workspace uv, empaquetado, grupo dev (ruff/pytest/mypy) | Implementado |
-| Migración del código de `account` y `common` (renombrado, fix de capas) | Implementado |
-| Build distroless validado (`Odoo → BigQuery` ejecuta) | Implementado |
-| Entidades de dominio + separación `persistence/` | Diseñado, pendiente |
-| `RepositoryInterface[T]` y `SyncStateInterface` | Diseñado, pendiente |
-| `SyncPipeline` genérico (composición) | Diseñado, pendiente |
-| Modelo medallion (capa servida) | Diseñado, pendiente |
-
-> El código migrado actual conserva el flujo basado en diccionarios y un loader
-> de BigQuery con `INSERT`. La refactorización hacia entidades, ports y append
-> idempotente está especificada en este documento y pendiente de implementación.
+| Workspace uv, src layout, empaquetado | Implementado |
+| Entidades de dominio + separación `domain/` / `persistence/` | Implementado |
+| Cuatro ports tipados (`Extractor`, `Transformer`, `Repository[T]`, `SyncState`) | Implementado |
+| `SyncPipeline[T]` genérico (composición) | Implementado |
+| Capa Bronze: `BigQueryAccountMoveRepository` (append) | Implementado |
+| `BigQuerySyncState` (watermark + plano de control) | Implementado |
+| Composition root (`__main__.py`) con wiring completo | Implementado |
+| Observabilidad: `LogBackend` Protocol + `GcpLogBackend` / `ConsoleLogBackend` | Implementado |
+| Datasets env-driven via `schema_translate_map` (tokens ORM → nombres reales) | Implementado |
+| Build distroless (multi-stage, `.dockerignore` strips dev) | Implementado |
+| CI: quality gates en GitHub Actions (`ci.yml`) | Implementado |
+| Release: `cz bump` + changelog (`release.yml`) | Implementado |
+| Capa Silver (deduplicación, `BQ_DATASET_SILVER`, materializador) | Diseñado, pendiente |
+| `build.yml` / `deploy.yml` (workflows de build y deploy) | Pendiente (IaC) |
