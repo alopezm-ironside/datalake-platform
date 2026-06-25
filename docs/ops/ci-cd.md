@@ -2,12 +2,12 @@
 
 ## Estado actual
 
-| Workflow | Estado | Descripción |
-| -------- | ------ | ----------- |
-| `ci.yml` — quality gates | Implementado | Lint, formato, tipos, tests, commits en cada push/PR |
-| `release.yml` — versión y changelog | Implementado | `cz bump` + `git push --follow-tags` (manual) |
-| `build.yml` — build de imagen | Implementado | Build once → push a registry dev → deploy a dev |
-| `deploy.yml` — promote a Cloud Run | Implementado | Promote por digest → Cloud Run Job (gate por entorno) |
+| Workflow                            | Estado       | Descripción                                           |
+| ----------------------------------- | ------------ | ----------------------------------------------------- |
+| `ci.yml` — quality gates            | Implementado | Lint, formato, tipos, tests, commits en cada push/PR  |
+| `release.yml` — versión y changelog | Implementado | `cz bump` + `git push --follow-tags` (manual)         |
+| `build.yml` — build de imagen       | Implementado | Build once → push a registry dev → deploy a dev       |
+| `deploy.yml` — promote a Cloud Run  | Implementado | Promote por digest → Cloud Run Job (gate por entorno) |
 
 ## Estrategia de entrega
 
@@ -22,10 +22,12 @@ imagen construida una sola vez.
 ## Workflow CI (`ci.yml`)
 
 Se activa en:
+
 - Push a `main`
 - Pull request (cualquier rama)
 
 Pasos en orden:
+
 1. `uv sync --all-packages`
 2. `uv run ruff check .` — lint
 3. `uv run ruff format --check .` — formato
@@ -39,6 +41,7 @@ Pasos en orden:
 Activación: manual (`workflow_dispatch`).
 
 Pasos:
+
 1. `uv sync --all-packages`
 2. `uv run cz bump --yes --changelog` — incrementa versión según conventional
    commits y actualiza `CHANGELOG.md`
@@ -82,14 +85,14 @@ Environment del `target`, que aporta sus variables y el gate de revisores:
 
 Cada entorno (`dev`, `staging`, `prod`) define estas variables (no secrets):
 
-| Variable | Origen |
-| -------- | ------ |
-| `WIF_PROVIDER` | output `wif_provider_name` del módulo IaC |
-| `DEPLOY_SA_EMAIL` | output `deployer_service_account_email` |
-| `AR_REPOSITORY` | output `artifact_registry_repository` |
-| `AR_LOCATION` | región del registry (ej. `us-central1-docker.pkg.dev`) |
-| `REGION` | región GCP (ej. `us-central1`) |
-| `GCP_PROJECT` | proyecto del entorno (`data-lake-<env>`) |
+| Variable          | Origen                                                 |
+| ----------------- | ------------------------------------------------------ |
+| `WIF_PROVIDER`    | output `wif_provider_name` del módulo IaC              |
+| `DEPLOY_SA_EMAIL` | output `deployer_service_account_email`                |
+| `AR_REPOSITORY`   | output `artifact_registry_repository`                  |
+| `AR_LOCATION`     | región del registry (ej. `us-central1-docker.pkg.dev`) |
+| `REGION`          | región GCP (ej. `us-central1`)                         |
+| `GCP_PROJECT`     | proyecto del entorno (`data-lake-<env>`)               |
 
 `staging` y `prod` deben configurar **required reviewers** para gatear el deploy.
 
