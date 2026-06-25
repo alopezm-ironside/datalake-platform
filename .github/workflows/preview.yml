@@ -31,7 +31,7 @@ jobs:
        (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'preview')))
     runs-on: ubuntu-latest
-    environment: dev
+    environment: preview
     steps:
       - uses: actions/checkout@v5
 
@@ -86,7 +86,7 @@ jobs:
             --region "${{ vars.REGION }}" \
             --project "${{ vars.GCP_PROJECT }}" \
             --service-account "${{ steps.names.outputs.runner }}" \
-            --set-env-vars "GOOGLE_PROJECT_ID=${{ vars.GCP_PROJECT }},GOOGLE_LOCATION=${{ vars.REGION }},BQ_DATASET_RAW=${{ steps.names.outputs.raw }},BQ_DATASET_CONTROL=${{ steps.names.outputs.control }},GOOGLE_CREDENTIAL_SERVICE_FILE=,EXTRACT_LIMIT=2000,LOG_BACKEND=console" \
+            --set-env-vars "GOOGLE_PROJECT_ID=${{ vars.GCP_PROJECT }},GOOGLE_LOCATION=${{ vars.REGION }},BQ_DATASET_RAW=${{ steps.names.outputs.raw }},BQ_DATASET_CONTROL=${{ steps.names.outputs.control }},GOOGLE_CREDENTIAL_SERVICE_FILE=,EXTRACT_LIMIT=2000" \
             --set-secrets "ODOO_URL=datalake-odoo-url-dev:latest,ODOO_DB=datalake-odoo-db-dev:latest,ODOO_USER=datalake-odoo-user-dev:latest,ODOO_PASSWORD=datalake-odoo-password-dev:latest"
 
       - name: Execute (bounded run)
@@ -121,7 +121,8 @@ jobs:
             echo ""
             echo "Para bajar el preview: quitá el label \`preview\` o cerrá el PR."
           } > preview-comment.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file preview-comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --body-file preview-comment.md
 
   teardown:
     # Tear down when the label is removed, or the PR (that had the label) closes.
@@ -131,7 +132,7 @@ jobs:
        (github.event.action == 'closed' &&
          contains(github.event.pull_request.labels.*.name, 'preview')))
     runs-on: ubuntu-latest
-    environment: dev
+    environment: preview
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -166,4 +167,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
             --body "🧹 Preview dado de baja (job + datasets eliminados)."
