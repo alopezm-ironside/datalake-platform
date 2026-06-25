@@ -43,7 +43,7 @@ def main() -> None:
     )
     connection.create_tables()
 
-    extractor = OdooAccountMoveExtractor(odoo)
+    extractor = OdooAccountMoveExtractor(odoo, extract_limit=settings.EXTRACT_LIMIT)
     transformer = AccountMoveTransformer(extractor)
     repository = BigQueryAccountMoveRepository(connection)
     sync_state = BigQuerySyncState(connection)

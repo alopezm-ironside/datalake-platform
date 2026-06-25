@@ -48,16 +48,22 @@ class OdooAccountMoveExtractor(ExtractorInterface, TaxCacheInterface):
         "credit",
     ]
 
-    def __init__(self, odoo_manager: OdooManager) -> None:
+    def __init__(self, odoo_manager: OdooManager, extract_limit: int = 0) -> None:
         self.odoo = odoo_manager
         self.tax_cache: dict[int, dict[str, Any]] = {}
+        self._extract_limit = extract_limit
 
     def get_source_name(self) -> str:
         return "odoo"
 
     def fetch_new_ids(self, last_processed_id: int = 0) -> list[int]:
         domain = [("id", ">", last_processed_id), ("line_ids", "!=", False)]
-        move_ids = self.odoo.search("account.move", domain, order="id asc")
+        move_ids = self.odoo.search(
+            "account.move",
+            domain,
+            order="id asc",
+            limit=self._extract_limit or None,
+        )
         _log.info("ids_fetched", count=len(move_ids), watermark=last_processed_id)
         return move_ids
 

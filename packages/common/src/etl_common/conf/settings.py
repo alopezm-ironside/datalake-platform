@@ -20,6 +20,9 @@ class Settings(BaseSettings):
 
     # Pipeline tuning (env-overridable)
     BATCH_SIZE: int = 1000
+    # Cap on records pulled per run; 0 means no cap. Used for bounded backfills
+    # and PR preview runs so they don't extract the full source table.
+    EXTRACT_LIMIT: int = 0
     LOG_BACKEND: str = "gcp"
 
     model_config = SettingsConfigDict(env_file=".env")

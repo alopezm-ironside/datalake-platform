@@ -74,11 +74,17 @@ class OdooManager(metaclass=SingletonMeta):
             )
 
     def search(
-        self, model: str, domain: list[Any], order: str | None = None
+        self,
+        model: str,
+        domain: list[Any],
+        order: str | None = None,
+        limit: int | None = None,
     ) -> list[int]:
         kwargs: dict[str, Any] = {}
         if order:
             kwargs["order"] = order
+        if limit:
+            kwargs["limit"] = limit
         result: list[int] = self._execute(
             model, "search", [domain], kwargs, f"Search {model} records"
         )

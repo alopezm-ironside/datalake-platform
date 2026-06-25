@@ -26,6 +26,7 @@ def _mock_settings() -> MagicMock:
     mock.BQ_DATASET_CONTROL = "datalake_control"
     mock.LOG_BACKEND = "gcp"
     mock.BATCH_SIZE = 1000
+    mock.EXTRACT_LIMIT = 0
     return mock
 
 
@@ -57,6 +58,9 @@ def test_main_wires_pipeline_and_calls_run() -> None:
         main()
 
     mock_pipeline.run.assert_called_once()
+    mock_extractor_cls.assert_called_once_with(
+        mock_odoo_cls.return_value, extract_limit=0
+    )
 
 
 def test_main_does_not_call_create_dataset() -> None:
