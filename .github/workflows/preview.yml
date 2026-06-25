@@ -1,0 +1,169 @@
+name: Preview
+
+# Per-PR ephemeral preview environments, on-demand via the `preview` label.
+# Each PR gets its own Cloud Run Job and isolated BigQuery datasets so runs
+# never touch the shared dev data. See infraestructure docs/datalake/
+# preview-environments.md for the full design.
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, closed]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MODULE: account
+
+jobs:
+  deploy:
+    # Deploy when the label is added, or new commits land on a labeled PR.
+    # Fork PRs can't use OIDC/secrets, so skip them entirely.
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.action == 'labeled' && github.event.label.name == 'preview') ||
+       (github.event.action == 'synchronize' &&
+         contains(github.event.pull_request.labels.*.name, 'preview')))
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker ${{ vars.AR_LOCATION }} --quiet
+
+      - name: Resolve preview names
+        id: names
+        run: |
+          pr="${{ github.event.pull_request.number }}"
+          sha="${{ github.event.pull_request.head.sha }}"
+          {
+            echo "job=datalake-${MODULE}-pr-${pr}"
+            echo "raw=datalake_odoo_raw_pr_${pr}"
+            echo "control=datalake_control_pr_${pr}"
+            echo "image=${{ vars.AR_REPOSITORY }}/${MODULE}:pr-${pr}-${sha}"
+            echo "runner=datalake-${MODULE}-runner@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push PR image
+        run: |
+          docker build -f "jobs/${MODULE}/Dockerfile" -t "${{ steps.names.outputs.image }}" .
+          docker push "${{ steps.names.outputs.image }}"
+
+      - name: Create isolated datasets
+        run: |
+          for ds in "${{ steps.names.outputs.raw }}" "${{ steps.names.outputs.control }}"; do
+            bq show --dataset "${{ vars.GCP_PROJECT }}:${ds}" >/dev/null 2>&1 || \
+              bq --location="${{ vars.REGION }}" mk --dataset \
+                --description "Preview PR #${{ github.event.pull_request.number }}" \
+                "${{ vars.GCP_PROJECT }}:${ds}"
+          done
+
+      - name: Deploy ephemeral job (create or update)
+        run: |
+          job="${{ steps.names.outputs.job }}"
+          if gcloud run jobs describe "$job" \
+               --region "${{ vars.REGION }}" --project "${{ vars.GCP_PROJECT }}" >/dev/null 2>&1; then
+            action=update
+          else
+            action=create
+          fi
+          gcloud run jobs "$action" "$job" \
+            --image "${{ steps.names.outputs.image }}" \
+            --region "${{ vars.REGION }}" \
+            --project "${{ vars.GCP_PROJECT }}" \
+            --service-account "${{ steps.names.outputs.runner }}" \
+            --set-env-vars "GOOGLE_PROJECT_ID=${{ vars.GCP_PROJECT }},GOOGLE_LOCATION=${{ vars.REGION }},BQ_DATASET_RAW=${{ steps.names.outputs.raw }},BQ_DATASET_CONTROL=${{ steps.names.outputs.control }},GOOGLE_CREDENTIAL_SERVICE_FILE=,EXTRACT_LIMIT=2000,LOG_BACKEND=console" \
+            --set-secrets "ODOO_URL=datalake-odoo-url-dev:latest,ODOO_DB=datalake-odoo-db-dev:latest,ODOO_USER=datalake-odoo-user-dev:latest,ODOO_PASSWORD=datalake-odoo-password-dev:latest"
+
+      - name: Execute (bounded run)
+        run: |
+          gcloud run jobs execute "${{ steps.names.outputs.job }}" \
+            --region "${{ vars.REGION }}" \
+            --project "${{ vars.GCP_PROJECT }}" \
+            --wait
+
+      - name: Collect row counts
+        run: |
+          bq query --project_id="${{ vars.GCP_PROJECT }}" --use_legacy_sql=false --format=pretty \
+            "SELECT table_id, row_count FROM \`${{ vars.GCP_PROJECT }}.${{ steps.names.outputs.raw }}.__TABLES__\` ORDER BY table_id" \
+            > raw_counts.txt || echo "(sin tablas todavía)" > raw_counts.txt
+
+      - name: Comment on PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### 🔬 Preview desplegado"
+            echo ""
+            echo "- **Job**: \`${{ steps.names.outputs.job }}\`"
+            echo "- **Datasets**: \`${{ steps.names.outputs.raw }}\`, \`${{ steps.names.outputs.control }}\`"
+            echo "- **Imagen**: \`${{ steps.names.outputs.image }}\`"
+            echo "- **Límite**: \`EXTRACT_LIMIT=2000\` (2000 registros más antiguos)"
+            echo ""
+            echo "**Filas en raw:**"
+            echo '```'
+            cat raw_counts.txt
+            echo '```'
+            echo ""
+            echo "Para bajar el preview: quitá el label \`preview\` o cerrá el PR."
+          } > preview-comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file preview-comment.md
+
+  teardown:
+    # Tear down when the label is removed, or the PR (that had the label) closes.
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.action == 'unlabeled' && github.event.label.name == 'preview') ||
+       (github.event.action == 'closed' &&
+         contains(github.event.pull_request.labels.*.name, 'preview')))
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve preview names
+        id: names
+        run: |
+          pr="${{ github.event.pull_request.number }}"
+          {
+            echo "job=datalake-${MODULE}-pr-${pr}"
+            echo "raw=datalake_odoo_raw_pr_${pr}"
+            echo "control=datalake_control_pr_${pr}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Delete ephemeral job
+        run: |
+          gcloud run jobs delete "${{ steps.names.outputs.job }}" \
+            --region "${{ vars.REGION }}" --project "${{ vars.GCP_PROJECT }}" --quiet || true
+
+      - name: Delete isolated datasets
+        run: |
+          for ds in "${{ steps.names.outputs.raw }}" "${{ steps.names.outputs.control }}"; do
+            bq rm -r -f --dataset "${{ vars.GCP_PROJECT }}:${ds}" || true
+          done
+
+      - name: Comment teardown
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "🧹 Preview dado de baja (job + datasets eliminados)."
