@@ -522,24 +522,21 @@ def test_stats_use_save_batch_return_count() -> None:
 
 
 # ---------------------------------------------------------------------------
-# W1 — End-to-end cursor-ordered crash-safety (Decision 5 compound test)
+# Pipeline watermark-threading across a crash boundary
+#
+# NOTE: This test verifies that the pipeline threads the cursor correctly
+# through two run instances at the port level (mocked extractor). It does NOT
+# guard the Decision 5 ordering/operator invariant — for that see:
+# jobs/account/tests/test_w1_crash_safety_real_extractor.py
 # ---------------------------------------------------------------------------
 
 
-def test_cursor_ordered_crash_safety_no_silent_data_loss() -> None:
-    """Decision 5: cursor-ordered extraction guarantees no silent data loss.
+def test_pipeline_watermark_threading_across_crash_boundary() -> None:
+    """Pipeline passes persisted watermark to run-2's fetch_new_ids.
 
-    Scenario:
-    - Run 1 processes batch-1 (write_date <= T1) and checkpoints cursor = T1.
-      Then a simulated crash occurs before batch-2 is processed.
-    - Run 2 starts from checkpoint watermark T1. Because extraction uses
-      write_date >= T1 (inclusive), batch-2 records (write_date >= T1) are
-      returned and processed — no data is silently skipped.
-
-    This test FAILS if:
-    - The extractor uses '>' instead of '>=' (batch-2 boundary records lost).
-    - The extractor orders by id instead of write_date (cursor no longer
-      corresponds to temporal ordering, checkpoint may skip records).
+    At the port level (mocked extractor): run-1 checkpoints batch-1 cursor,
+    crash occurs, run-2 receives that cursor as its watermark argument.
+    Does NOT guard write_date ordering or >= operator — see account-level W1.
     """
     batch1_cursor = datetime(2024, 3, 15, 9, 0, 0, tzinfo=_UTC)
     batch2_cursor = datetime(2024, 3, 15, 11, 0, 0, tzinfo=_UTC)
