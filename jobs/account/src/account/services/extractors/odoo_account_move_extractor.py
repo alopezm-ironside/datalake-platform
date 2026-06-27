@@ -2,15 +2,14 @@
 
 from datetime import datetime
 from typing import Any, ClassVar
-from zoneinfo import ZoneInfo
 
 from etl_common.infrastructure.odoo_manager import OdooManager
 from etl_common.interfaces.extractor_interface import ExtractorInterface
 from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
 from etl_common.observability import get_logger
+from etl_common.utils.dates import parse_naive_utc
 
 _log = get_logger(__name__)
-_UTC = ZoneInfo("UTC")
 
 
 class OdooAccountMoveExtractor(ExtractorInterface[datetime], TaxCacheInterface):
@@ -94,15 +93,9 @@ class OdooAccountMoveExtractor(ExtractorInterface[datetime], TaxCacheInterface):
     def max_cursor(self, raw_batch: list[dict[str, Any]]) -> datetime:
         """Return the maximum write_date seen in raw_batch as a UTC datetime."""
         parsed = [
-            self._parse_ts(r["write_date"]) for r in raw_batch if r.get("write_date")
+            parse_naive_utc(r["write_date"]) for r in raw_batch if r.get("write_date")
         ]
-        return max(parsed)
-
-    def _parse_ts(self, raw_value: str) -> datetime:
-        # Odoo UTC naive string, second-precision; [:19] strips microseconds.
-        return datetime.strptime(raw_value[:19], "%Y-%m-%d %H:%M:%S").replace(
-            tzinfo=_UTC
-        )
+        return max(dt for dt in parsed if dt is not None)
 
     def fetch_batch(self, ids: list[int]) -> list[dict[str, Any]]:
         if not ids:
