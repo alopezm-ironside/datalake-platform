@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from etl_common.observability import configure_logging, get_logger, resolve_backend
@@ -254,15 +255,13 @@ def test_sync_pipeline_emits_structured_log_events(
     repository = MagicMock()
     repository.save_batch.return_value = 3
 
-    from datetime import datetime, timezone
-
     sync_state = MagicMock()
     sync_state.get_watermark.return_value = None
     sync_state.start.return_value = "run-log-test"
 
     extractor.max_cursor.return_value = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    pipeline: SyncPipeline[Ent] = SyncPipeline(
+    pipeline: SyncPipeline[Ent, datetime] = SyncPipeline(
         module_name="log_test_module",
         extractor=extractor,
         transformer=transformer,
@@ -326,7 +325,7 @@ def test_sync_pipeline_emits_run_failed_on_exception(
     sync_state.get_watermark.return_value = None
     sync_state.start.return_value = "run-fail-test"
 
-    pipeline: SyncPipeline[Ent] = SyncPipeline(
+    pipeline: SyncPipeline[Ent, datetime] = SyncPipeline(
         module_name="fail_module",
         extractor=extractor,
         transformer=transformer,
