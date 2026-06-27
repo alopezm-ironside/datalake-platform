@@ -34,7 +34,13 @@ class BigQuerySyncState(SyncStateInterface[datetime]):
                 .first()
             )
             if row and row.last_processed_ts is not None:
-                return row.last_processed_ts
+                ts = row.last_processed_ts
+                # BigQuery DATETIME round-trips as naive; the pipeline compares
+                # the cursor against extractor.max_cursor (aware UTC), so the
+                # watermark must be tz-aware to avoid a naive/aware TypeError.
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                return ts
             return None
 
     def start(self, module_name: str, sync_type: str = "incremental") -> str:

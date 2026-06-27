@@ -67,6 +67,39 @@ def test_get_watermark_returns_datetime_from_success_row() -> None:
     assert isinstance(result, datetime)
 
 
+def test_get_watermark_normalizes_naive_ts_to_aware_utc() -> None:
+    """BigQuery DATETIME round-trips as naive; get_watermark must return aware UTC.
+
+    The pipeline advances the watermark via max(watermark, extractor.max_cursor),
+    and max_cursor returns an aware UTC datetime. A naive watermark read back
+    from BigQuery would raise "can't compare offset-naive and offset-aware
+    datetimes" on the second (incremental) run.
+    """
+    from account.persistence.repositories.bigquery_sync_state import BigQuerySyncState
+
+    naive_ts = datetime(2024, 3, 15, 10, 0, 0)  # no tzinfo — as BigQuery returns it
+    mock_session = MagicMock()
+    mock_row = MagicMock()
+    mock_row.last_processed_ts = naive_ts
+    query_chain = mock_session.query.return_value.filter.return_value
+    query_chain.filter.return_value.order_by.return_value.first.return_value = mock_row
+
+    with patch(
+        "account.persistence.repositories.bigquery_sync_state.Session"
+    ) as mock_session_cls:
+        mock_session_cls.return_value.__enter__ = lambda s: mock_session
+        mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        state = BigQuerySyncState(connection=_make_connection())
+        result = state.get_watermark("accounting")
+
+    assert result is not None
+    assert result.tzinfo is not None, (
+        "watermark must be tz-aware to compare against max_cursor"
+    )
+    assert result == datetime(2024, 3, 15, 10, 0, 0, tzinfo=_UTC)
+
+
 def test_get_watermark_does_not_reference_last_processed_id() -> None:
     """get_watermark must not access last_processed_id on the row."""
     import inspect
