@@ -1,6 +1,8 @@
 """AccountMove transformer — maps Odoo raw dicts to domain entities."""
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from etl_common.interfaces.tax_cache_interface import TaxCacheInterface
 from etl_common.interfaces.transformer_interface import TransformerInterface
@@ -8,6 +10,8 @@ from etl_common.observability import get_logger
 
 from account.domain.account_move import AccountMove
 from account.domain.account_move_line import AccountMoveLine
+
+_UTC = ZoneInfo("UTC")
 
 _log = get_logger(__name__)
 
@@ -64,7 +68,16 @@ class AccountMoveTransformer(TransformerInterface[AccountMove]):
             state=raw.get("state", ""),
             payment_state=raw.get("payment_state", ""),
             ref=raw.get("ref", ""),
+            write_date=self._parse_write_date(raw.get("write_date")),
             lines=lines,
+        )
+
+    def _parse_write_date(self, raw_value: str | None) -> datetime | None:
+        if not raw_value:
+            return None
+        # Odoo UTC naive string, second-precision; [:19] strips microseconds.
+        return datetime.strptime(raw_value[:19], "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=_UTC
         )
 
     def _line_to_entity(
