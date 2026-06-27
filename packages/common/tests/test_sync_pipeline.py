@@ -519,3 +519,120 @@ def test_stats_use_save_batch_return_count() -> None:
     assert stats.records_processed == 3
     assert stats.records_inserted == 2
     assert stats.records_failed == 1
+
+
+# ---------------------------------------------------------------------------
+# W1 — End-to-end cursor-ordered crash-safety (Decision 5 compound test)
+# ---------------------------------------------------------------------------
+
+
+def test_cursor_ordered_crash_safety_no_silent_data_loss() -> None:
+    """Decision 5: cursor-ordered extraction guarantees no silent data loss.
+
+    Scenario:
+    - Run 1 processes batch-1 (write_date <= T1) and checkpoints cursor = T1.
+      Then a simulated crash occurs before batch-2 is processed.
+    - Run 2 starts from checkpoint watermark T1. Because extraction uses
+      write_date >= T1 (inclusive), batch-2 records (write_date >= T1) are
+      returned and processed — no data is silently skipped.
+
+    This test FAILS if:
+    - The extractor uses '>' instead of '>=' (batch-2 boundary records lost).
+    - The extractor orders by id instead of write_date (cursor no longer
+      corresponds to temporal ordering, checkpoint may skip records).
+    """
+    batch1_cursor = datetime(2024, 3, 15, 9, 0, 0, tzinfo=_UTC)
+    batch2_cursor = datetime(2024, 3, 15, 11, 0, 0, tzinfo=_UTC)
+
+    # --- Run 1: batch-1 succeeds, checkpoint advances, crash before batch-2 ---
+    batch1_ids = [10, 20, 30]  # all have write_date <= batch1_cursor
+    batch1_raw = [
+        {"id": 10, "write_date": "2024-03-15 08:00:00"},
+        {"id": 20, "write_date": "2024-03-15 09:00:00"},  # max = batch1_cursor
+        {"id": 30, "write_date": "2024-03-15 07:00:00"},
+    ]
+
+    run1_extractor = make_extractor(
+        new_ids=batch1_ids,
+        raw_batch=batch1_raw,
+        cursor_per_batch=[batch1_cursor],
+    )
+    run1_transformer = make_transformer()
+    run1_repository = make_repository()
+    run1_sync_state = make_sync_state(watermark=None, batch_id="run-1")
+
+    pipeline1: SyncPipeline[FakeEntity, datetime] = SyncPipeline(
+        module_name="account_move",
+        extractor=run1_extractor,
+        transformer=run1_transformer,
+        repository=run1_repository,
+        sync_state=run1_sync_state,
+        batch_size=1000,
+    )
+    pipeline1.run()
+
+    # Verify run-1 checkpointed batch1_cursor.
+    assert run1_sync_state.checkpoint.call_count == 1
+    persisted_watermark = run1_sync_state.checkpoint.call_args[0][1]
+    assert persisted_watermark == batch1_cursor, (
+        f"Run-1 must checkpoint batch-1 max cursor ({batch1_cursor}), "
+        f"got {persisted_watermark}"
+    )
+
+    # --- Simulate crash: run-2 starts from the checkpointed watermark ---
+    # batch-2 contains records whose write_date is >= batch1_cursor.
+    # The boundary record (id=40, write_date == batch1_cursor) must NOT be
+    # lost — this is the inclusive '>=' requirement.
+    batch2_ids = [40, 50, 60]
+    batch2_raw = [
+        {"id": 40, "write_date": "2024-03-15 09:00:00"},  # == batch1_cursor (boundary)
+        {"id": 50, "write_date": "2024-03-15 10:00:00"},
+        {"id": 60, "write_date": "2024-03-15 11:00:00"},  # max = batch2_cursor
+    ]
+
+    # The extractor for run-2 must be called with watermark = batch1_cursor.
+    # It must return batch2_ids (simulating write_date >= batch1_cursor filter).
+    run2_extractor = make_extractor(
+        new_ids=batch2_ids,
+        raw_batch=batch2_raw,
+        cursor_per_batch=[batch2_cursor],
+    )
+    run2_transformer = make_transformer()
+    run2_repository = make_repository()
+    # Run-2 starts from the persisted watermark (= batch1_cursor after crash).
+    run2_sync_state = make_sync_state(watermark=persisted_watermark, batch_id="run-2")
+
+    pipeline2: SyncPipeline[FakeEntity, datetime] = SyncPipeline(
+        module_name="account_move",
+        extractor=run2_extractor,
+        transformer=run2_transformer,
+        repository=run2_repository,
+        sync_state=run2_sync_state,
+        batch_size=1000,
+    )
+    pipeline2.run()
+
+    # Assert: run-2 extractor was called with batch1_cursor (not None, not 0).
+    run2_watermark_arg = run2_extractor.fetch_new_ids.call_args[0][0]
+    assert run2_watermark_arg == batch1_cursor, (
+        f"Run-2 must start from checkpointed cursor ({batch1_cursor}), "
+        f"got {run2_watermark_arg} — crash recovery is broken"
+    )
+
+    # Assert: batch-2 records are processed (not silently skipped).
+    assert run2_repository.save_batch.call_count == 1, (
+        "Run-2 must process batch-2 records; save_batch was not called"
+    )
+    saved_entities = run2_repository.save_batch.call_args[0][0]
+    saved_ids = {e.id for e in saved_entities}
+    assert saved_ids == {40, 50, 60}, (
+        f"Expected batch-2 IDs {{40, 50, 60}}, got {saved_ids} — "
+        "boundary record (id=40, write_date == checkpoint) must not be lost"
+    )
+
+    # Assert: final watermark advanced to batch2_cursor.
+    run2_final_watermark = run2_sync_state.finish.call_args[0][2]
+    assert run2_final_watermark == batch2_cursor, (
+        f"Run-2 must finish with batch-2 cursor ({batch2_cursor}), "
+        f"got {run2_final_watermark}"
+    )
