@@ -101,7 +101,7 @@ class SyncPipeline(Generic[T, Cursor]):
                 # never interprets the cursor value, only the extractor does.
                 batch_cursor = self._extractor.max_cursor(raw)
                 watermark = (
-                    batch_cursor if watermark is None else max(watermark, batch_cursor)
+                    batch_cursor if watermark is None else max(watermark, batch_cursor)  # type: ignore[call-overload]
                 )
 
                 stats = SyncStats(
