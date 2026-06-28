@@ -1,0 +1,13 @@
+silver:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev:
+      type: bigquery
+      method: "{{ env_var('DBT_BQ_METHOD', 'oauth') }}"
+      project: "{{ env_var('BQ_PROJECT_ID') }}"
+      dataset: "{{ env_var('BQ_DATASET_SILVER') }}"
+      location: "{{ env_var('BQ_LOCATION', 'us-central1') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+      priority: interactive
+      job_execution_timeout_seconds: 600
+      job_retries: 1

@@ -1,0 +1,3 @@
+packages:
+  # No external packages required for Slice 2.
+  # Reserved for dbt_utils when additional macro support is needed (Slice 3+).

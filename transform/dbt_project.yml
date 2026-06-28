@@ -1,0 +1,35 @@
+name: 'transform'
+version: '1.0.0'
+config-version: 2
+
+# Profile defined in profiles.yml
+profile: 'silver'
+
+model-paths: ['models']
+macro-paths: ['macros']
+test-paths: ['tests']
+seed-paths: ['seeds']
+analysis-paths: ['analyses']
+snapshot-paths: ['snapshots']
+
+target-path: 'target'
+clean-targets:
+  - 'target'
+  - 'dbt_packages'
+
+# Require dbt >= 1.8 for native unit-test support
+require-dbt-version: ['>=1.8.0', '<3.0.0']
+
+# Required environment variables:
+#   BQ_PROJECT_ID        — GCP project that owns the BigQuery datasets
+#   BQ_DATASET_RAW       — Bronze (source) dataset name (e.g. datalake_odoo_raw)
+#   BQ_DATASET_SILVER    — Silver (target) dataset name (e.g. datalake_silver)
+#   BQ_LOCATION          — BigQuery location (e.g. us-central1)
+#   DBT_TARGET           — dbt target name; defaults to 'dev'
+#   DBT_BQ_METHOD        — BigQuery auth method; defaults to 'oauth'
+#   DBT_THREADS          — parallelism; defaults to 4
+
+models:
+  transform:
+    staging:
+      +materialized: table

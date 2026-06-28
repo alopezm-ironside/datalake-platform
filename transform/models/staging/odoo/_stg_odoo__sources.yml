@@ -1,0 +1,48 @@
+version: 2
+
+sources:
+  - name: odoo_raw
+    database: "{{ env_var('BQ_PROJECT_ID') }}"
+    schema: "{{ env_var('BQ_DATASET_RAW') }}"
+    description: >
+      Bronze append-only Odoo snapshots. Grain: one row per (id, extraction run).
+      require_partition_filter = True on both tables; models must include
+      `where date is not null` to satisfy the partition filter on a full-table scan.
+    tables:
+      - name: account_moves
+        description: >
+          Append-only account.move snapshots extracted from Odoo.
+          Grain: (id, synced_at). Partitioned by date (MONTH), clustered by
+          (partner_name, move_type, state).
+        columns:
+          - name: id
+            description: Odoo account.move integer primary key.
+          - name: write_date
+            description: >
+              Odoo source-modification timestamp (log_access field).
+              Nullable — rows written before Slice 1 landed have NULL.
+          - name: synced_at
+            description: Ingestion timestamp; always non-NULL.
+          - name: date
+            description: >
+              Accounting date (DATE). Partition column.
+              Used as partition filter predicate in staging models.
+
+      - name: account_move_lines
+        description: >
+          Append-only account.move.line snapshots extracted from Odoo.
+          Grain: (id, synced_at). Partitioned by date (MONTH), clustered by
+          (account_move_id, account_id, product_id).
+        columns:
+          - name: id
+            description: Odoo account.move.line integer primary key.
+          - name: write_date
+            description: >
+              Odoo source-modification timestamp (log_access field).
+              Nullable — rows written before FR-0 (Slice 2 pre-step) landed have NULL.
+          - name: synced_at
+            description: Ingestion timestamp; always non-NULL.
+          - name: date
+            description: >
+              Accounting date (DATE). Inherited from the parent move.
+              Partition column used as partition filter predicate in staging models.
