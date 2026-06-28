@@ -1,0 +1,409 @@
+version: 2
+
+models:
+  - name: stg_odoo__account_moves
+    description: >
+      Staging model for Odoo account.move — one row per Odoo account.move id,
+      reflecting the latest known state. Deduped from Bronze append-only snapshots by
+      source_modified_at DESC (write_date), ingested_at DESC (synced_at).
+      Business columns mirror Bronze names exactly (Option A).
+    config:
+      unique_key: id
+    columns:
+      - name: id
+        description: Odoo account.move integer primary key.
+        tests:
+          - unique
+          - not_null
+      - name: name
+        description: Odoo move reference number (e.g. INV/2026/00001; "/" for draft moves).
+      - name: move_type
+        description: >
+          Odoo move type (e.g. out_invoice, in_invoice, out_refund, in_refund,
+          entry, out_receipt, in_receipt).
+      - name: date
+        description: Accounting date (DATE). Partition column from Bronze.
+      - name: partner_id
+        description: Odoo res.partner integer id.
+      - name: partner_name
+        description: Odoo res.partner display name (pre-flattened in Bronze).
+      - name: company_id
+        description: Odoo res.company integer id.
+      - name: company_name
+        description: Odoo res.company display name (pre-flattened in Bronze).
+      - name: journal_id
+        description: Odoo account.journal integer id (pre-flattened in Bronze).
+      - name: journal_name
+        description: Odoo account.journal display name (pre-flattened in Bronze).
+      - name: currency_name
+        description: ISO currency code (pre-flattened in Bronze).
+      - name: amount_untaxed
+        description: Untaxed amount in document currency.
+      - name: amount_tax
+        description: Tax amount in document currency.
+      - name: amount_total
+        description: Total amount in document currency.
+      - name: state
+        description: >
+          Move lifecycle state (draft, posted, cancel).
+      - name: payment_state
+        description: >
+          Payment state (not_paid, in_payment, paid, partial, reversed, invoicing_legacy).
+      - name: ref
+        description: External reference or vendor bill number.
+      - name: source_modified_at
+        description: >
+          Source modification timestamp (Odoo write_date). Nullable — rows
+          extracted before Slice 1 landed have NULL; ingested_at tiebreaks.
+      - name: ingested_at
+        description: Ingestion timestamp (synced_at); always non-NULL.
+      - name: sync_batch_id
+        description: Extraction batch identifier for lineage tracing.
+
+  - name: stg_odoo__account_move_lines
+    description: >
+      Staging model for Odoo account.move.line — one row per Odoo account.move.line id,
+      reflecting the latest known state. Deduped from Bronze append-only snapshots by
+      source_modified_at DESC (write_date), ingested_at DESC (synced_at).
+      Dedup order is SYMMETRIC with stg_odoo__account_moves (enabled by the Slice 2
+      pre-step adding write_date to Bronze lines). Business columns mirror Bronze names
+      exactly (Option A).
+    config:
+      unique_key: id
+    columns:
+      - name: id
+        description: Odoo account.move.line integer primary key.
+        tests:
+          - unique
+          - not_null
+      - name: account_move_id
+        description: FK to stg_odoo__account_moves.id (parent move).
+      - name: product_id
+        description: Odoo product.product integer id. Nullable.
+      - name: description
+        description: >
+          Line description (renamed from Odoo `name` in Bronze to avoid
+          collision with the move-level `name` field).
+      - name: date
+        description: Accounting date (DATE) inherited from the parent move. Partition column from Bronze.
+      - name: quantity
+        description: Quantity (product UoM).
+      - name: price_unit
+        description: Unit price in document currency.
+      - name: discount
+        description: Discount percentage.
+      - name: price_subtotal
+        description: Subtotal after discount, before tax.
+      - name: price_total
+        description: Total including taxes.
+      - name: account_id
+        description: Odoo account.account integer id.
+      - name: account_name
+        description: Odoo account.account display name (pre-flattened in Bronze).
+      - name: debit
+        description: Debit amount in company currency.
+      - name: credit
+        description: Credit amount in company currency.
+      - name: tax_ids
+        description: Array of Odoo account.tax integer ids applied to this line.
+      - name: tax_rate
+        description: Effective tax rate (float).
+      - name: tax_amount
+        description: Tax amount for this line.
+      - name: source_modified_at
+        description: >
+          Source modification timestamp (Odoo write_date, added by FR-0).
+          Nullable — rows extracted before the Slice 2 pre-step landed have
+          NULL; ingested_at tiebreaks (NULLS LAST on DESC in BigQuery).
+      - name: ingested_at
+        description: Ingestion timestamp (synced_at); always non-NULL.
+      - name: sync_batch_id
+        description: Extraction batch identifier for lineage tracing.
+
+unit_tests:
+  # ---------------------------------------------------------------------------
+  # stg_odoo__account_moves unit tests
+  # ---------------------------------------------------------------------------
+
+  - name: test_account_moves_dedup_keeps_latest_by_write_date
+    description: >
+      Two snapshots of the same move id with different write_date values.
+      The row with the greater write_date must be the sole staging row.
+      Covers spec scenarios S-2 and S-5.
+    model: stg_odoo__account_moves
+    given:
+      - input: source('odoo_raw', 'account_moves')
+        rows:
+          - id: 1
+            name: "INV/2026/00001"
+            move_type: "out_invoice"
+            date: "2026-01-15"
+            partner_id: 10
+            partner_name: "Acme Corp"
+            company_id: 1
+            company_name: "My Company"
+            journal_id: 5
+            journal_name: "Customer Invoices"
+            currency_name: "USD"
+            amount_untaxed: 1000.0
+            amount_tax: 190.0
+            amount_total: 1190.0
+            state: "draft"
+            payment_state: "not_paid"
+            ref: null
+            write_date: "2026-01-01 10:00:00"
+            synced_at: "2026-01-01 11:00:00"
+            sync_batch_id: "batch-001"
+          - id: 1
+            name: "INV/2026/00001"
+            move_type: "out_invoice"
+            date: "2026-01-15"
+            partner_id: 10
+            partner_name: "Acme Corp"
+            company_id: 1
+            company_name: "My Company"
+            journal_id: 5
+            journal_name: "Customer Invoices"
+            currency_name: "USD"
+            amount_untaxed: 1000.0
+            amount_tax: 190.0
+            amount_total: 1190.0
+            state: "posted"
+            payment_state: "not_paid"
+            ref: null
+            write_date: "2026-02-01 10:00:00"
+            synced_at: "2026-02-01 11:00:00"
+            sync_batch_id: "batch-002"
+    expect:
+      rows:
+        - id: 1
+          state: "posted"
+          source_modified_at: "2026-02-01 10:00:00"
+          ingested_at: "2026-02-01 11:00:00"
+
+  - name: test_account_moves_dedup_tiebreak_synced_at
+    description: >
+      Two snapshots of the same move id with identical write_date but different
+      synced_at. The row with the greater synced_at (ingested_at) must win.
+      Covers spec scenario S-3 (boundary re-fetch dedup).
+    model: stg_odoo__account_moves
+    given:
+      - input: source('odoo_raw', 'account_moves')
+        rows:
+          - id: 7
+            name: "INV/2026/00007"
+            move_type: "out_invoice"
+            date: "2026-03-05"
+            partner_id: 20
+            partner_name: "Beta Ltd"
+            company_id: 1
+            company_name: "My Company"
+            journal_id: 5
+            journal_name: "Customer Invoices"
+            currency_name: "USD"
+            amount_untaxed: 500.0
+            amount_tax: 95.0
+            amount_total: 595.0
+            state: "posted"
+            payment_state: "paid"
+            ref: "REF-001"
+            write_date: "2026-03-05 09:00:00"
+            synced_at: "2026-03-05 10:00:00"
+            sync_batch_id: "batch-010"
+          - id: 7
+            name: "INV/2026/00007"
+            move_type: "out_invoice"
+            date: "2026-03-05"
+            partner_id: 20
+            partner_name: "Beta Ltd"
+            company_id: 1
+            company_name: "My Company"
+            journal_id: 5
+            journal_name: "Customer Invoices"
+            currency_name: "USD"
+            amount_untaxed: 500.0
+            amount_tax: 95.0
+            amount_total: 595.0
+            state: "posted"
+            payment_state: "paid"
+            ref: "REF-001"
+            write_date: "2026-03-05 09:00:00"
+            synced_at: "2026-03-05 12:00:00"
+            sync_batch_id: "batch-011"
+    expect:
+      rows:
+        - id: 7
+          source_modified_at: "2026-03-05 09:00:00"
+          ingested_at: "2026-03-05 12:00:00"
+
+  # ---------------------------------------------------------------------------
+  # stg_odoo__account_move_lines unit tests
+  # ---------------------------------------------------------------------------
+
+  - name: test_account_move_lines_dedup_keeps_latest_by_write_date
+    description: >
+      Two snapshots of the same line id with different write_date values.
+      The row with the greater write_date must be the sole staging row.
+      Confirms the SYMMETRIC dedup axis (source_modified_at DESC).
+      Covers spec scenarios S-9 and S-10.
+    model: stg_odoo__account_move_lines
+    given:
+      - input: source('odoo_raw', 'account_move_lines')
+        rows:
+          - id: 201
+            account_move_id: 1
+            product_id: 42
+            description: "Widget A"
+            date: "2026-02-01"
+            quantity: 2.0
+            price_unit: 500.0
+            discount: 0.0
+            price_subtotal: 1000.0
+            price_total: 1190.0
+            account_id: 100
+            account_name: "Revenue"
+            debit: 0.0
+            credit: 1000.0
+            tax_ids: [1]
+            tax_rate: 19.0
+            tax_amount: 190.0
+            write_date: "2026-02-01 08:00:00"
+            synced_at: "2026-02-01 09:00:00"
+            sync_batch_id: "batch-020"
+          - id: 201
+            account_move_id: 1
+            product_id: 42
+            description: "Widget A (corrected qty)"
+            date: "2026-02-01"
+            quantity: 3.0
+            price_unit: 500.0
+            discount: 0.0
+            price_subtotal: 1500.0
+            price_total: 1785.0
+            account_id: 100
+            account_name: "Revenue"
+            debit: 0.0
+            credit: 1500.0
+            tax_ids: [1]
+            tax_rate: 19.0
+            tax_amount: 285.0
+            write_date: "2026-02-15 14:30:00"
+            synced_at: "2026-02-15 15:00:00"
+            sync_batch_id: "batch-030"
+    expect:
+      rows:
+        - id: 201
+          quantity: 3.0
+          source_modified_at: "2026-02-15 14:30:00"
+          ingested_at: "2026-02-15 15:00:00"
+
+  - name: test_account_move_lines_dedup_tiebreak_synced_at
+    description: >
+      Two snapshots of the same line id with identical write_date but different
+      synced_at. The row with the greater synced_at (ingested_at) must win.
+      Confirms the symmetric tiebreaker behavior for lines.
+    model: stg_odoo__account_move_lines
+    given:
+      - input: source('odoo_raw', 'account_move_lines')
+        rows:
+          - id: 300
+            account_move_id: 2
+            product_id: null
+            description: "Tax line"
+            date: "2026-04-01"
+            quantity: 1.0
+            price_unit: 100.0
+            discount: 0.0
+            price_subtotal: 100.0
+            price_total: 100.0
+            account_id: 200
+            account_name: "Tax Payable"
+            debit: 100.0
+            credit: 0.0
+            tax_ids: []
+            tax_rate: 0.0
+            tax_amount: 0.0
+            write_date: "2026-04-01 08:00:00"
+            synced_at: "2026-04-01 09:00:00"
+            sync_batch_id: "batch-040"
+          - id: 300
+            account_move_id: 2
+            product_id: null
+            description: "Tax line"
+            date: "2026-04-01"
+            quantity: 1.0
+            price_unit: 100.0
+            discount: 0.0
+            price_subtotal: 100.0
+            price_total: 100.0
+            account_id: 200
+            account_name: "Tax Payable"
+            debit: 100.0
+            credit: 0.0
+            tax_ids: []
+            tax_rate: 0.0
+            tax_amount: 0.0
+            write_date: "2026-04-01 08:00:00"
+            synced_at: "2026-04-01 11:00:00"
+            sync_batch_id: "batch-041"
+    expect:
+      rows:
+        - id: 300
+          source_modified_at: "2026-04-01 08:00:00"
+          ingested_at: "2026-04-01 11:00:00"
+
+  - name: test_dedup_null_write_date_falls_back_to_synced_at
+    description: >
+      Two rows with NULL write_date (pre-FR-0 Bronze rows). The row with the
+      greater synced_at must win. Covers spec scenario S-4: NULL write_date
+      is a valid handled case — BigQuery sorts NULLs LAST on DESC, so the
+      NULL bucket is resolved entirely by ingested_at DESC.
+    model: stg_odoo__account_move_lines
+    given:
+      - input: source('odoo_raw', 'account_move_lines')
+        rows:
+          - id: 99
+            account_move_id: 5
+            product_id: null
+            description: "Pre-FR-0 line"
+            date: "2025-06-01"
+            quantity: 1.0
+            price_unit: 200.0
+            discount: 0.0
+            price_subtotal: 200.0
+            price_total: 200.0
+            account_id: 300
+            account_name: "Accounts Receivable"
+            debit: 200.0
+            credit: 0.0
+            tax_ids: []
+            tax_rate: 0.0
+            tax_amount: 0.0
+            write_date: null
+            synced_at: "2025-06-01 08:00:00"
+            sync_batch_id: "batch-old-001"
+          - id: 99
+            account_move_id: 5
+            product_id: null
+            description: "Pre-FR-0 line"
+            date: "2025-06-01"
+            quantity: 1.0
+            price_unit: 200.0
+            discount: 0.0
+            price_subtotal: 200.0
+            price_total: 200.0
+            account_id: 300
+            account_name: "Accounts Receivable"
+            debit: 200.0
+            credit: 0.0
+            tax_ids: []
+            tax_rate: 0.0
+            tax_amount: 0.0
+            write_date: null
+            synced_at: "2025-06-01 12:00:00"
+            sync_batch_id: "batch-old-002"
+    expect:
+      rows:
+        - id: 99
+          source_modified_at: null
+          ingested_at: "2025-06-01 12:00:00"
