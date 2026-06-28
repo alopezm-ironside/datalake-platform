@@ -4,7 +4,7 @@ Proyecto dbt que produce la **capa Silver** del medallion: una fila por entidad,
 estado actual, deduplicada desde Bronze. Vive en `transform/`, **fuera del
 workspace de uv** — dbt no es un paquete Python del monorepo.
 
-Adaptador: `dbt-bigquery` (dbt-fusion 2.0).
+Ejecutado con dbt-fusion 2.0 (motor con soporte nativo para BigQuery).
 
 ---
 
@@ -52,9 +52,9 @@ Reutilizable. Devuelve una fila por `unique_key`, la que ordena primero por
 ```
 
 Implementación: subquery `ROW_NUMBER()`, **no** `QUALIFY`. Razón: `QUALIFY` en
-ZetaSQL requiere un `WHERE TRUE` de acompañamiento cuando el outer query no tiene
-cláusula `WHERE`, lo que lo hace propenso a errores en un contexto paramétrico de
-macro. La forma de subquery es válida incondicionalmente.
+ZetaSQL requiere un `WHERE TRUE` de acompañamiento solo cuando el outer query no
+tiene cláusula `WHERE`, lo que lo hace propenso a errores en un contexto
+paramétrico de macro. La forma de subquery es válida incondicionalmente.
 
 Comportamiento en casos borde:
 - `write_date` NULL (filas pre-Slice 1): BigQuery ordena `NULLS LAST` en `DESC`;
@@ -106,7 +106,7 @@ gcloud auth application-default login
 |----------|-----------|---------|-------------|
 | `BQ_PROJECT_ID` | Sí | — | Proyecto GCP |
 | `BQ_DATASET_RAW` | Sí | — | Dataset Bronze (fuente) |
-| `BQ_DATASET_SILVER` | Sí | `datalake_silver` | Dataset Silver (destino) |
+| `BQ_DATASET_SILVER` | Sí | — | Dataset Silver (destino) |
 | `BQ_LOCATION` | No | `us-central1` | Location de BigQuery |
 | `DBT_TARGET` | No | `dev` | Target de dbt |
 | `DBT_BQ_METHOD` | No | `oauth` | Método de auth BigQuery |
@@ -143,7 +143,7 @@ con un error de tiempo de ejecución. Asegurarse en el IaC antes del primer depl
 | Schema `unique` + `not_null` sobre `id` | Ambos modelos |
 | Unit: latest por `write_date` | `stg_odoo__account_moves`, `stg_odoo__account_move_lines` |
 | Unit: tiebreak por `synced_at` (mismo `write_date`) | Ambos modelos |
-| Unit: fallback con `write_date` NULL (filas pre-Slice 2) | `stg_odoo__account_move_lines` |
+| Unit: fallback con `write_date` NULL (filas pre-FR-0) | `stg_odoo__account_move_lines` |
 
 ---
 

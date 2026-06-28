@@ -1,4 +1,4 @@
-{{ config(materialized='table', unique_key='id') }}
+{{ config(materialized='table') }}
 
 {#
     Staging model: stg_odoo__account_move_lines

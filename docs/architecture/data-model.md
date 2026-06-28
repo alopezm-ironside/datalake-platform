@@ -62,7 +62,7 @@ Silver se produce con el proyecto dbt `transform/` (ver
 está encapsulada en el macro `dedup_latest(relation, unique_key, order_by)`:
 retiene una fila por `id`, la más reciente según `source_modified_at DESC,
 ingested_at DESC` (SCD Type 1). La implementación usa `ROW_NUMBER()` vía subquery
-— no `QUALIFY` — para garantizar compatibilidad incondicionanal con ZetaSQL en
+— no `QUALIFY` — para garantizar compatibilidad incondicional con ZetaSQL en
 contexto paramétrico de macro.
 
 El predicado `where date is not null` en cada modelo satisface el

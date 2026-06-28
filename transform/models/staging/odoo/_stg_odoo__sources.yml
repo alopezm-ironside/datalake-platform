@@ -3,7 +3,7 @@ version: 2
 sources:
   - name: odoo_raw
     database: "{{ env_var('BQ_PROJECT_ID') }}"
-    schema: "{{ env_var('BQ_DATASET_RAW', 'datalake_odoo_raw') }}"
+    schema: "{{ env_var('BQ_DATASET_RAW') }}"
     description: >
       Bronze append-only Odoo snapshots. Grain: one row per (id, extraction run).
       require_partition_filter = True on both tables; models must include

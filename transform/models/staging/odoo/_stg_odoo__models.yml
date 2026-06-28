@@ -7,8 +7,6 @@ models:
       reflecting the latest known state. Deduped from Bronze append-only snapshots by
       source_modified_at DESC (write_date), ingested_at DESC (synced_at).
       Business columns mirror Bronze names exactly (Option A).
-    config:
-      unique_key: id
     columns:
       - name: id
         description: Odoo account.move integer primary key.
@@ -68,8 +66,6 @@ models:
       Dedup order is SYMMETRIC with stg_odoo__account_moves (enabled by the Slice 2
       pre-step adding write_date to Bronze lines). Business columns mirror Bronze names
       exactly (Option A).
-    config:
-      unique_key: id
     columns:
       - name: id
         description: Odoo account.move.line integer primary key.

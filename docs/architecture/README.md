@@ -130,13 +130,13 @@ a una capa de consumo futura, lo que mantiene el staging extensible: agregar
 
 **Deduplicación:** el macro reutilizable `dedup_latest(relation, unique_key, order_by)`
 aplica `ROW_NUMBER()` via subquery (no `QUALIFY`, para evitar el requisito
-`WHERE TRUE` de ZetaSQL en contexto paramétrico). Resultado: SCD Type 1 —
+`WHERE TRUE` de ZetaSQL cuando el outer query no tiene cláusula `WHERE`). Resultado: SCD Type 1 —
 una fila por `id`, la más reciente por `source_modified_at DESC, ingested_at DESC`.
 
 **Materialización:** `table` (rescan completo + dedup en cada ejecución). Diseño
 incremental-ready: el swap a `incremental`/`merge` requiere sólo cambiar la config
-y agregar un predicado de ventana sobre el eje de ingesta (`synced_at`); el macro
-no se modifica. Ver [`transform/README.md`](../../transform/README.md) para el
+y agregar un subquery escalar de lookback en el `WHERE` del CTE `bronze` sobre el
+eje de ingesta (`synced_at`); el macro no se modifica. Ver [`transform/README.md`](../../transform/README.md) para el
 path completo.
 
 **Requisito de infraestructura:** todos los datasets de BigQuery (`BQ_DATASET_RAW`,
